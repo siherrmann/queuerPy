@@ -429,11 +429,15 @@ class QueuerJobMixin:
         Updates job status to running with worker.
         """
         if not self.worker:
+            logger.debug("No worker available, skipping job run")
             return
 
         jobs = self.db_job.update_jobs_initial(self.worker)
         if not jobs:
+            logger.debug("No jobs found to run")
             return
+
+        logger.info(f"Found {len(jobs)} jobs to run")
 
         # Get the event loop stored during start() or current running loop
         event_loop = getattr(self, "_event_loop", None)
@@ -442,16 +446,15 @@ class QueuerJobMixin:
                 event_loop = asyncio.get_running_loop()
                 logger.debug("Using current running event loop for scheduled jobs")
             except RuntimeError:
-                # No event loop available in this thread
-                # This happens when called from background threads (listeners, tickers)
-                logger.debug(
-                    "No event loop available, running jobs synchronously in thread"
+                logger.error(
+                    "No event loop available for running async jobs - queuer not properly started"
                 )
-                # For background threads, we'll run jobs directly without event loop coordination
-                self._run_jobs_in_thread(jobs)
-                return
+                raise RuntimeError(
+                    "Queuer not properly started: no event loop available"
+                )
 
         for job in jobs:
+            logger.info(f"Processing job: {job.rid}")
             if (
                 job.options
                 and job.options.schedule
@@ -487,6 +490,7 @@ class QueuerJobMixin:
                     logger.error(f"Failed to schedule job: {e}")
             else:
                 # Run the job immediately
+                logger.info(f"Running job immediately: {job.rid}")
                 try:
                     future = asyncio.run_coroutine_threadsafe(
                         self._run_job(job), event_loop
@@ -495,52 +499,17 @@ class QueuerJobMixin:
                     # Add error handling for the task to prevent unawaited coroutine warnings
                     def handle_task_done(future_ref):
                         try:
-                            exc = future_ref.exception()
-                            if exc is not None:
-                                logger.error(f"Background job task failed: {exc}")
-                        except Exception as e:
-                            logger.error(f"Error in task done callback: {e}")
+                            result = (
+                                future_ref.result()
+                            )  # Get result to check for exceptions
+                            logger.debug(f"Job {job.rid} completed successfully")
+                        except Exception as exc:
+                            logger.error(f"Background job task failed: {exc}")
 
                     future.add_done_callback(handle_task_done)
+                    logger.debug(f"Submitted job {job.rid} to event loop")
                 except Exception as e:
                     logger.error(f"Failed to run job: {e}")
-
-    def _run_jobs_in_thread(self, jobs: List["Job"]) -> None:
-        """
-        Run jobs in a background thread without event loop coordination.
-        This is used when _run_job_initial is called from background threads.
-
-        Args:
-            jobs: List of jobs to run
-        """
-        for job in jobs:
-            try:
-                # Create a new event loop for this thread to run async jobs
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-                try:
-                    if (
-                        job.options
-                        and job.options.schedule
-                        and job.options.schedule.start
-                        and job.options.schedule.start > time.time()
-                    ):
-                        # For scheduled jobs, we'll run them after the delay
-                        logger.info(f"Running scheduled job: {job.rid}")
-                        delay = job.options.schedule.start - time.time()
-                        if delay > 0:
-                            time.sleep(delay)  # Simple sleep for background thread
-                        loop.run_until_complete(self._run_job(job))
-                    else:
-                        # Run job immediately
-                        logger.info(f"Running job in thread: {job.rid}")
-                        loop.run_until_complete(self._run_job(job))
-                finally:
-                    loop.close()
-
-            except Exception as e:
-                logger.error(f"Failed to run job {job.rid} in thread: {e}")
 
     async def _wait_for_job(
         self, job: "Job"
