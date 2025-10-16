@@ -84,6 +84,7 @@ class Queuer(QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerLis
         self.cancel_func = None
         self._running = False
         self._stopped = threading.Event()
+        self._event_loop = None  # Store reference to the main event loop
         
         # Database configuration
         if db_config is not None:
@@ -134,7 +135,6 @@ class Queuer(QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerLis
         self.job_update_listener = new_listener(self.job_update_broadcaster)
         self.job_delete_listener = new_listener(self.job_delete_broadcaster)
 
-
     def start(self, cancel_func: Optional[Callable] = None) -> None:
         """
         Start the queuer.
@@ -147,6 +147,16 @@ class Queuer(QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerLis
         self.cancel_func = cancel_func
         self._running = True
         self._stopped.clear()  # Clear the stopped flag
+        
+        # Try to capture the current event loop
+        try:
+            self._event_loop = asyncio.get_running_loop()
+            self.log.debug("Captured running event loop")
+        except RuntimeError:
+            # No running loop, create a new one if needed
+            # In modern asyncio, we should avoid get_event_loop() when no loop is running
+            self.log.debug("No running event loop found, will create one when needed")
+            self._event_loop = None
         
         # Set up database listeners
         try:
@@ -183,7 +193,6 @@ class Queuer(QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerLis
 
         self.log.info(f"Queuer '{self.worker.name}' started with max concurrency {self.worker.max_concurrency}")
 
-
     def stop(self) -> None:
         """
         Stop the queuer.
@@ -218,7 +227,6 @@ class Queuer(QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerLis
         
         self.log.info(f"Queuer '{self.worker.name}' stopped")
 
-
     def _start_listeners(self) -> None:
         """Start database listeners."""
         def handle_job_notification(notification):
@@ -232,7 +240,6 @@ class Queuer(QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerLis
         # Start job listener
         if self.job_db_listener:
             self.job_db_listener.listen(handle_job_notification)
-
 
     def _start_heartbeat_ticker(self) -> None:
         """Start heartbeat ticker."""
@@ -248,7 +255,6 @@ class Queuer(QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerLis
         ticker = new_ticker(timedelta(seconds=30), heartbeat_func)
         self.log.info("Starting heartbeat ticker...")
         ticker.go()
-
 
     def _start_poll_job_ticker(self) -> None:
         """Start job polling ticker."""

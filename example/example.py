@@ -1,12 +1,11 @@
 """
-Simple example demonstrating the Queuer library with testcontainers.
+Simple example demonstrating the Queuer library matching the Go example structure.
 Shows basic task creation, job processing, and waiting for completion.
 """
 
 import asyncio
-import time
-from typing import Dict, Any
 import logging
+import time
 import sys
 import os
 
@@ -18,33 +17,31 @@ from queuer import new_queuer_with_db
 from helper.test_database import DatabaseTestMixin
 
 
-def example_task(job_data: Dict[str, Any]) -> Dict[str, Any]:
+def short_task(param1: int, param2: str) -> int:
     """
-    Simple example task that processes data.
+    Short running example task function.
+    Mirrors the Go ShortTask function exactly.
     
     Args:
-        job_data: Dictionary containing job parameters
+        param1: Integer parameter
+        param2: String parameter that should be convertible to int
         
     Returns:
-        Dictionary with processing results
+        Sum of param1 and param2 (converted to int)
+        
+    Raises:
+        ValueError: If param2 cannot be converted to int
     """
-    message = job_data.get('message', 'Hello')
-    number = job_data.get('number', 0)
-    
-    print(f"Processing: {message} with number {number}")
-    
     # Simulate some work
     time.sleep(1)
     
-    result = {
-        "status": "completed",
-        "processed_message": f"Processed: {message}",
-        "calculated_value": number * 2,
-        "timestamp": time.time()
-    }
+    # Example for some error handling
+    try:
+        param2_int = int(param2)
+    except ValueError as e:
+        raise ValueError(f"Cannot convert param2 '{param2}' to int") from e
     
-    print(f"Task completed: {result}")
-    return result
+    return param1 + param2_int
 
 
 class QueuerExample(DatabaseTestMixin):
@@ -61,67 +58,66 @@ class QueuerExample(DatabaseTestMixin):
         self.teardown_class()
         
     async def run_example(self):
-        """Run the main example demonstration."""
-        print("=== Simple Queuer Example ===")
-        
-        # Configure logging
-        logging.basicConfig(level=logging.INFO)
-        
-        # Create a new queuer with the testcontainers database
-        print("1. Creating queuer with database...")
-        queuer = new_queuer_with_db(
-            name="example_queuer",
-            max_concurrency=2,
-            encryption_key="",
-            db_config=self.db.config,
-            options=None
-        )
-        print(f"   Queuer created: {queuer.name}")
-        
-        # Add the task
-        print("2. Adding task...")
-        queuer.add_task(example_task)
-        print(f"   Task added: example_task")
-        
-        # Start the queuer
-        print("3. Starting queuer...")
-        queuer.start()
-        print("   Queuer is now running")
-        
-        # Add a job
-        print("4. Adding job...")
-        job_data = {"message": "Hello World", "number": 42}
-        job = queuer.add_job(example_task, job_data)
-        print(f"   Added job with RID: {job.rid}")
-        
-        # Wait for the job to finish
-        print("5. Waiting for job to complete...")
-        finished_job = await queuer.wait_for_job_finished(job.rid)
-        
-        if finished_job:
-            print(f"   Job completed with status: {finished_job.status.name}")
-            if finished_job.results:
-                print(f"   Results: {finished_job.results}")
-        else:
-            print("   Job did not complete (cancelled or timeout)")
-        
-        print("6. Example completed!")
-        return finished_job
+        """Run the main example demonstration matching Go structure."""
+        try:
+            # Create a new queuer instance
+            q = new_queuer_with_db(
+                name="exampleEasyWorker",
+                max_concurrency=3,
+                encryption_key="",
+                db_config=self.db.config,
+                options=None
+            )
+            
+            # Add a short task to the queuer
+            q.add_task(short_task)
+            
+            # Start the queuer
+            cancel_called = False
+            
+            def cancel_func():
+                nonlocal cancel_called
+                cancel_called = True
+                
+            q.start(cancel_func)
+            
+            # Add a job to the queue
+            job = q.add_job(short_task, 5, "12")
+            if not job:
+                logging.error("Error adding job")
+                return None
+            
+            # Wait for job to finish (equivalent to Go's WaitForJobFinished)
+            job = await q.wait_for_job_finished(job.rid)
+            
+            logging.info(f"Job finished with status: {job.status}")
+            
+            # Stop the queuer gracefully
+            q.stop()
+            
+            # Wait for a while to let the jobs process
+            # (equivalent to Go's <-ctx.Done())
+            if cancel_called:
+                logging.info("Context was cancelled")
+                
+            logging.info("Exiting...")
+            return job
+            
+        except Exception as e:
+            logging.error(f"Error in example: {e}")
+            raise
 
 
 async def main():
     """Main function."""
+    # Configure logging to match Go's log output style
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+    
     example = QueuerExample()
     try:
-        result = await example.run_example()
-        if result:
-            print(f"\n✅ Successfully processed job: {result.task_name}")
-        else:
-            print(f"\n❌ Job processing failed or was cancelled")
+        await example.run_example()
     except Exception as e:
-        print(f"\n❌ Example failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logging.error(f"Error in example: {e}")
     finally:
         example.cleanup()
 

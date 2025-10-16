@@ -201,6 +201,16 @@ class JobDBHandler:
             row = cur.fetchone()
             return self._row_to_job(row) if row else None
     
+    def select_job_from_archive(self, rid: UUID) -> Optional[Job]:
+        """Select a job from archive by RID."""
+        with self.db.instance.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                SELECT * FROM job_archive WHERE rid = %s;
+            """, (rid,))
+            
+            row = cur.fetchone()
+            return self._row_to_job(row) if row else None
+    
     def select_all_jobs(self, last_id: int = 0, entries: int = 100) -> List[Job]:
         """Select all jobs with pagination."""
         with self.db.instance.cursor(row_factory=dict_row) as cur:

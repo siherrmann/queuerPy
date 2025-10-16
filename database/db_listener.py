@@ -85,9 +85,8 @@ class QueuerListener:
         while self._listening and not self._stop_event.is_set():
             try:
                 # Check for notifications
-                notifies = self.connection.notifies()
-                while notifies:
-                    notify = notifies.popleft()
+                notifies = list(self.connection.notifies())
+                for notify in notifies:
                     if notify and self._notify_function:
                         # Call notify function in separate thread to avoid blocking
                         threading.Thread(
