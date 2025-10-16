@@ -1,0 +1,232 @@
+"""
+Tests for helper.task module.
+"""
+
+import pytest
+from typing import List, Tuple, Union
+from helper.task import (
+    check_valid_task,
+    check_valid_task_with_parameters,
+    get_task_name_from_function,
+    get_task_name_from_interface,
+    get_input_parameters_from_task,
+    get_output_parameters_from_task,
+    validate_task_signature
+)
+
+
+class TestTaskValidation:
+    """Test task validation functions."""
+    
+    def test_check_valid_task_with_function(self):
+        """Test valid function passes validation."""
+        def sample_function():
+            pass
+        
+        # Should not raise
+        check_valid_task(sample_function)
+    
+    def test_check_valid_task_with_none(self):
+        """Test None task raises ValueError."""
+        with pytest.raises(ValueError, match="task must not be None"):
+            check_valid_task(None)
+    
+    def test_check_valid_task_with_non_callable(self):
+        """Test non-callable task raises ValueError."""
+        with pytest.raises(ValueError, match="task must be a function"):
+            check_valid_task("not a function")
+    
+    def test_check_valid_task_with_parameters_matching(self):
+        """Test task with matching parameters passes validation."""
+        def add_numbers(a: int, b: int) -> int:
+            return a + b
+        
+        # Should not raise
+        check_valid_task_with_parameters(add_numbers, 1, 2)
+    
+    def test_check_valid_task_with_parameters_wrong_count(self):
+        """Test task with wrong parameter count raises ValueError."""
+        def add_numbers(a: int, b: int) -> int:
+            return a + b
+        
+        with pytest.raises(ValueError, match="task expects 2 parameters, got 1"):
+            check_valid_task_with_parameters(add_numbers, 1)
+    
+    def test_check_valid_task_with_parameters_wrong_type(self):
+        """Test task with wrong parameter type raises ValueError."""
+        def process_string(text: str) -> str:
+            return text.upper()
+        
+        with pytest.raises(ValueError, match="parameter 0 of task must be of type str"):
+            check_valid_task_with_parameters(process_string, 123)
+
+
+class TestTaskNameExtraction:
+    """Test task name extraction functions."""
+    
+    def test_get_task_name_from_function(self):
+        """Test getting name from function."""
+        def sample_function():
+            pass
+        
+        name = get_task_name_from_function(sample_function)
+        assert name == "sample_function"
+    
+    def test_get_task_name_from_interface_with_string(self):
+        """Test getting name from string interface."""
+        name = get_task_name_from_interface("custom_task_name")
+        assert name == "custom_task_name"
+    
+    def test_get_task_name_from_interface_with_function(self):
+        """Test getting name from function interface."""
+        def another_function():
+            pass
+        
+        name = get_task_name_from_interface(another_function)
+        assert name == "another_function"
+    
+    def test_get_task_name_from_lambda(self):
+        """Test getting name from lambda function."""
+        lambda_func = lambda x: x * 2
+        name = get_task_name_from_function(lambda_func)
+        assert "<lambda>" in name
+
+
+class TestParameterIntrospection:
+    """Test parameter introspection functions."""
+    
+    def test_get_input_parameters_from_task(self):
+        """Test extracting input parameters."""
+        def sample_function(a: int, b: str, c: float) -> bool:
+            return True
+        
+        input_params = get_input_parameters_from_task(sample_function)
+        assert input_params == [int, str, float]
+    
+    def test_get_input_parameters_no_annotations(self):
+        """Test extracting input parameters without type annotations."""
+        def sample_function(a, b, c):
+            return True
+        
+        from typing import Any
+        input_params = get_input_parameters_from_task(sample_function)
+        assert input_params == [Any, Any, Any]
+    
+    def test_get_output_parameters_from_task(self):
+        """Test extracting output parameters."""
+        def sample_function() -> int:
+            return 42
+        
+        output_params = get_output_parameters_from_task(sample_function)
+        assert output_params == [int]
+    
+    def test_get_output_parameters_multiple_returns(self):
+        """Test extracting multiple return types."""
+        def sample_function() -> Tuple[int, str]:
+            return 42, "hello"
+        
+        output_params = get_output_parameters_from_task(sample_function)
+        assert output_params == [int, str]
+    
+    def test_get_output_parameters_no_annotation(self):
+        """Test extracting output parameters without annotation."""
+        def sample_function():
+            return 42
+        
+        from typing import Any
+        output_params = get_output_parameters_from_task(sample_function)
+        assert output_params == [Any]
+
+
+class TestSignatureValidation:
+    """Test task signature validation."""
+    
+    def test_validate_task_signature_matching(self):
+        """Test validation with matching signature."""
+        def sample_function(a: int, b: str) -> bool:
+            return True
+        
+        is_valid = validate_task_signature(
+            sample_function,
+            expected_inputs=[int, str],
+            expected_outputs=[bool]
+        )
+        assert is_valid is True
+    
+    def test_validate_task_signature_mismatched_inputs(self):
+        """Test validation with mismatched input types."""
+        def sample_function(a: int, b: str) -> bool:
+            return True
+        
+        is_valid = validate_task_signature(
+            sample_function,
+            expected_inputs=[str, int],  # Wrong order
+            expected_outputs=[bool]
+        )
+        assert is_valid is False
+    
+    def test_validate_task_signature_mismatched_outputs(self):
+        """Test validation with mismatched output types."""
+        def sample_function(a: int) -> str:
+            return "hello"
+        
+        is_valid = validate_task_signature(
+            sample_function,
+            expected_inputs=[int],
+            expected_outputs=[int]  # Wrong type
+        )
+        assert is_valid is False
+    
+    def test_validate_task_signature_any_type_flexibility(self):
+        """Test validation allows Any type for flexibility."""
+        def sample_function(a, b) -> int:  # No input annotations
+            return 42
+        
+        from typing import Any
+        is_valid = validate_task_signature(
+            sample_function,
+            expected_inputs=[Any, Any],
+            expected_outputs=[int]
+        )
+        assert is_valid is True
+
+
+class TestEdgeCases:
+    """Test edge cases and error conditions."""
+    
+    def test_class_method_as_task(self):
+        """Test using class method as task."""
+        class Calculator:
+            def add(self, a: int, b: int) -> int:
+                return a + b
+        
+        calc = Calculator()
+        name = get_task_name_from_function(calc.add)
+        assert "add" in name
+    
+    def test_static_method_as_task(self):
+        """Test using static method as task."""
+        class Calculator:
+            @staticmethod
+            def multiply(a: int, b: int) -> int:
+                return a * b
+        
+        name = get_task_name_from_function(Calculator.multiply)
+        assert "multiply" in name
+    
+    def test_builtin_function_as_task(self):
+        """Test using builtin function as task."""
+        name = get_task_name_from_function(len)
+        assert name == "len"
+    
+    def test_complex_type_annotations(self):
+        """Test complex type annotations."""
+        def complex_function(items: List[int], mapping: dict) -> Union[str, None]:
+            return None
+        
+        input_params = get_input_parameters_from_task(complex_function)
+        output_params = get_output_parameters_from_task(complex_function)
+        
+        assert List[int] in input_params
+        assert dict in input_params
+        assert Union[str, None] in output_params
