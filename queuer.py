@@ -3,37 +3,38 @@ Main Queuer class for Python implementation.
 Mirrors the Go Queuer struct with Python async patterns.
 """
 
+# Standard library imports
 import asyncio
-import threading
+import json
 import logging
+import os
+import threading
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Callable, Any
 from uuid import UUID
-import os
 
-# Import database components
+# Local imports - database components
 from database.db_job import JobDBHandler
 from database.db_worker import WorkerDBHandler
 from database.db_listener import QueuerListener
 
-# Import core components
+# Local imports - core components
 from core.broadcaster import Broadcaster, new_broadcaster
 from core.listener import Listener, new_listener
 from core.ticker import Ticker, new_ticker
-from core.scheduler import Scheduler
 from core.runner import Runner
 
-# Import model classes
-from model.job import Job, new_job, JobStatus
-from model.task import Task, new_task, new_task_with_name
+# Local imports - model classes
+from model.job import Job, JobStatus
+from model.task import Task
 from model.worker import Worker, new_worker, new_worker_with_options, WorkerStatus
 from model.options import Options
 from model.options_on_error import OnError
 
-# Import helper components
+# Local imports - helper components
 from helper.database import Database, new_database, DatabaseConfiguration
 
-# Import mixins
+# Local imports - mixins
 from queuer_job import QueuerJobMixin
 from queuer_task import QueuerTaskMixin
 from queuer_next_interval import QueuerNextIntervalMixin
@@ -76,48 +77,54 @@ class Queuer(
         It returns a pointer to the newly created Queuer instance.
         """
         # Store name and concurrency for access
-        self.name = name
-        self.max_concurrency = max_concurrency
+        self.name: str = name
+        self.max_concurrency: int = max_concurrency
 
         # Logger
-        self.log = logging.getLogger(f"queuer.{name}")
+        self.log: logging.Logger = logging.getLogger(f"queuer.{name}")
 
         # Context management
-        self.ctx = None
-        self.cancel_func = None
-        self._running = False
-        self._stopped = threading.Event()
-        self._event_loop = None  # Store reference to the main event loop
-        self._event_loop_thread = None  # Thread running the event loop if created here
+        self._running: bool = False
+        self._stopped: threading.Event = threading.Event()
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = (
+            None  # Store reference to the main event loop
+        )
+        self._event_loop_thread: Optional[threading.Thread] = (
+            None  # Thread running the event loop if created here
+        )
 
         # Database configuration
         if db_config is not None:
-            self.db_config = db_config
+            self.db_config: DatabaseConfiguration = db_config
         else:
-            self.db_config = DatabaseConfiguration.from_env()
+            self.db_config: DatabaseConfiguration = DatabaseConfiguration.from_env()
 
         # Database connection
-        self.database = new_database("queuer", self.db_config, self.log)
+        self.database: Database = new_database("queuer", self.db_config, self.log)
         self.DB = self.database.instance
 
         # Database handlers
-        self.db_job = JobDBHandler(
+        self.db_job: JobDBHandler = JobDBHandler(
             self.database, self.db_config.with_table_drop, encryption_key
         )
-        self.db_worker = WorkerDBHandler(self.database, self.db_config.with_table_drop)
+        self.db_worker: WorkerDBHandler = WorkerDBHandler(
+            self.database, self.db_config.with_table_drop
+        )
 
         # Configuration
-        self.job_poll_interval = timedelta(minutes=1)
-        self.retention_archive = timedelta(days=30)
+        self.job_poll_interval: timedelta = timedelta(minutes=1)
+        self.retention_archive: timedelta = timedelta(days=30)
 
         # Create and insert worker
         if options:
-            new_worker_obj = new_worker_with_options(name, max_concurrency, options)
+            new_worker_obj: Worker = new_worker_with_options(
+                name, max_concurrency, options
+            )
         else:
-            new_worker_obj = new_worker(name, max_concurrency)
+            new_worker_obj: Worker = new_worker(name, max_concurrency)
 
-        self.worker = self.db_worker.insert_worker(new_worker_obj)
-        self.worker_mutex = threading.RLock()
+        self.worker: Worker = self.db_worker.insert_worker(new_worker_obj)
+        self.worker_mutex: threading.RLock = threading.RLock()
 
         self.log.info(
             f"Queuer with worker created: {new_worker_obj.name} (RID: {self.worker.rid})"
@@ -135,24 +142,22 @@ class Queuer(
         self.job_archive_db_listener: Optional[QueuerListener] = None
 
         # Job broadcasters and listeners
-        self.job_insert_broadcaster = new_broadcaster("job.INSERT")
-        self.job_update_broadcaster = new_broadcaster("job.UPDATE")
-        self.job_delete_broadcaster = new_broadcaster("job.DELETE")
+        self.job_insert_broadcaster: Broadcaster = new_broadcaster("job.INSERT")
+        self.job_update_broadcaster: Broadcaster = new_broadcaster("job.UPDATE")
+        self.job_delete_broadcaster: Broadcaster = new_broadcaster("job.DELETE")
 
-        self.job_insert_listener = new_listener(self.job_insert_broadcaster)
-        self.job_update_listener = new_listener(self.job_update_broadcaster)
-        self.job_delete_listener = new_listener(self.job_delete_broadcaster)
+        self.job_insert_listener: Listener = new_listener(self.job_insert_broadcaster)
+        self.job_update_listener: Listener = new_listener(self.job_update_broadcaster)
+        self.job_delete_listener: Listener = new_listener(self.job_delete_broadcaster)
 
-    def start(self, cancel_func: Optional[Callable] = None) -> None:
+    def start(self) -> None:
         """
         Start the queuer.
-        Mirrors Go's Start(ctx, cancel, masterSettings) method.
         """
         if self._running:
             raise RuntimeError("Queuer is already running")
 
         # Set up context
-        self.cancel_func = cancel_func
         self._running = True
         self._stopped.clear()  # Clear the stopped flag
 
@@ -256,10 +261,6 @@ class Queuer(
                 self._event_loop_thread.join(timeout=1.0)
                 self.log.debug("Stopped background event loop thread")
 
-        # Signal cancellation
-        if self.cancel_func:
-            self.cancel_func()
-
         self.log.info(f"Queuer '{self.worker.name}' stopped")
 
     def _start_listeners(self) -> None:
@@ -268,12 +269,33 @@ class Queuer(
         def handle_job_notification(notification):
             """Handle job database notifications."""
             try:
-                # Run job when notified
-                self._run_job_initial()
+                # Parse notification to determine if it's an insert or delete
+                job_data = json.loads(notification)
+
+                # Check if this is a job being deleted (moved to archive)
+                # We can detect this by checking if the job has completion data
+                if "results" in job_data and job_data.get("results") is not None:
+                    # This is a completed job being archived, broadcast delete event
+                    job = Job.from_dict(job_data)
+                    if (
+                        hasattr(self, "job_delete_broadcaster")
+                        and self.job_delete_broadcaster
+                    ):
+                        # Use asyncio to broadcast in the event loop
+                        if self._event_loop and not self._event_loop.is_closed():
+                            self._event_loop.call_soon_threadsafe(
+                                lambda: asyncio.create_task(
+                                    self.job_delete_broadcaster.broadcast(job)
+                                )
+                            )
+                else:
+                    # This is a new job being inserted, run job processing
+                    self._run_job_initial()
+
             except Exception as e:
                 self.log.error(f"Error handling job notification: {e}")
 
-        # Start job listener
+        # Start job listener for both inserts and deletes
         if self.job_db_listener:
             self.job_db_listener.listen(handle_job_notification)
 
@@ -289,7 +311,7 @@ class Queuer(
             except Exception as e:
                 self.log.error(f"Heartbeat error: {e}")
 
-        ticker = new_ticker(timedelta(seconds=30), heartbeat_func)
+        ticker: Ticker = new_ticker(timedelta(seconds=30), heartbeat_func)
         self.log.info("Starting heartbeat ticker...")
         ticker.go()
 
@@ -305,7 +327,7 @@ class Queuer(
                 self.log.error(f"Error running job: {e}")
 
         # Create and start ticker - mirrors Go implementation
-        ticker = new_ticker(self.job_poll_interval, poll_func)
+        ticker: Ticker = new_ticker(self.job_poll_interval, poll_func)
         self.log.info("Starting job poll ticker...")
         ticker.go()
 

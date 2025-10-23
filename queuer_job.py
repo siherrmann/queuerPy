@@ -4,11 +4,12 @@ Mirrors Go's queuerJob.go functionality.
 """
 
 import asyncio
+import concurrent.futures
 import logging
 import threading
+import time
 from typing import List, Optional, Any, Union, Callable, TYPE_CHECKING
 from uuid import UUID
-import time
 
 from core.runner import Runner, new_runner_from_job
 from core.retryer import Retryer
@@ -16,14 +17,10 @@ from helper.task import get_task_name_from_interface
 from model.job import Job, JobStatus, new_job as create_job
 from model.options import Options
 
-# Set up logger
-logger = logging.getLogger(__name__)
-
 if TYPE_CHECKING:
-    from model.job import Job
-    from model.options import Options
     from model.batch_job import BatchJob
 
+# Set up logger
 logger = logging.getLogger(__name__)
 
 
@@ -47,8 +44,8 @@ class QueuerJobMixin:
         Raises:
             Exception: If something goes wrong
         """
-        options = self._merge_options(None)
-        job = self._add_job(task, options, *parameters)
+        options: Optional[Options] = self._merge_options(None)
+        job: Job = self._add_job(task, options, *parameters)
 
         logger.info(f"Job added: {job.rid}")
 
@@ -57,12 +54,12 @@ class QueuerJobMixin:
     def add_job_with_options(self, options: dict, task: str, *parameters):
         """Add a new job with specific options."""
         # Merge default options with provided options
-        options = self._merge_options(options)
+        options: Optional[Options] = self._merge_options(options)
 
         try:
             # Create new job
-            new_job = create_job(task, options, *parameters)
-            job = self.db_job.insert_job(new_job)
+            new_job: Job = create_job(task, options, *parameters)
+            job: Job = self.db_job.insert_job(new_job)
 
             logger.info(f"Job with options added: {job.rid}")
             return job
@@ -75,8 +72,8 @@ class QueuerJobMixin:
         """Internal method to add a job."""
         try:
             # Create new job
-            new_job = create_job(task, options, *parameters)
-            job = self.db_job.insert_job(new_job)
+            new_job: Job = create_job(task, options, *parameters)
+            job: Job = self.db_job.insert_job(new_job)
             return job
 
         except Exception as e:
@@ -92,19 +89,33 @@ class QueuerJobMixin:
         Raises:
             Exception: If something goes wrong during the process
         """
-        jobs = []
+        jobs: List[Job] = []
         for batch_job in batch_jobs:
-            options = self._merge_options(batch_job.options)
-            task_name = get_task_name_from_interface(batch_job.task)
-            job = create_job(task_name, batch_job.parameters, options)
+            options: Optional[Options] = self._merge_options(batch_job.options)
+            task_name: str = get_task_name_from_interface(batch_job.task)
+            job: Job = create_job(task_name, batch_job.parameters, options)
             jobs.append(job)
 
         self.db_job.batch_insert_jobs(jobs)
         logger.info(f"Jobs added: {len(jobs)}")
 
     def wait_for_job_added(self, timeout_seconds: float = 30.0) -> Optional["Job"]:
-        job_added = asyncio.run(self._wait_for_job_added_inner(timeout_seconds))
-        return job_added
+        """
+        Wait for any job to start and return the job.
+        Handles event loop coordination properly.
+        """
+        # Use existing event loop if available, otherwise create new one
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context, need to run in thread pool
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run, self._wait_for_job_added_inner(timeout_seconds)
+                )
+                return future.result(timeout=timeout_seconds + 5.0)
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(self._wait_for_job_added_inner(timeout_seconds))
 
     async def _wait_for_job_added_inner(
         self, timeout_seconds: float = 30.0
@@ -124,17 +135,17 @@ class QueuerJobMixin:
             logger.warning("Job insert listener not available")
             return None
 
-        job_added = asyncio.Event()
-        received_job = None
+        job_added: asyncio.Event = asyncio.Event()
+        received_job: Optional[Job] = None
 
-        def on_job_added(job):
+        def on_job_added(job: Job) -> None:
             nonlocal received_job
             received_job = job
             job_added.set()
 
         # Create threading events for the listener
-        stop_event = threading.Event()
-        ready_event = threading.Event()
+        stop_event: threading.Event = threading.Event()
+        ready_event: threading.Event = threading.Event()
 
         try:
             # Start listening in a separate thread
@@ -149,8 +160,14 @@ class QueuerJobMixin:
             listener_thread = threading.Thread(target=listen_thread)
             listener_thread.start()
 
-            # Wait for listener to be ready
-            ready_event.wait(timeout=5.0)  # 5 second timeout for listener ready
+            # Wait for listener to be ready with longer timeout under load
+            if not ready_event.wait(timeout=10.0):  # Increased from 5.0 to 10.0 seconds
+                logger.warning(
+                    "Job insert listener failed to become ready within timeout"
+                )
+                stop_event.set()
+                listener_thread.join(timeout=1.0)
+                return None
 
             # Wait for job to be added or timeout
             try:
@@ -173,30 +190,111 @@ class QueuerJobMixin:
     def wait_for_job_finished(
         self, job_rid: UUID, timeout_seconds: float = 30.0
     ) -> Optional["Job"]:
-        finished_job = asyncio.run(
-            self._wait_for_job_finished_inner(job_rid, timeout_seconds)
-        )
-        return finished_job
+        """
+        Wait for a job to finish and return the job.
+        Handles event loop coordination properly.
+        """
+        # Check if we're in an event loop context
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context, use run_coroutine_threadsafe
+            if hasattr(self, "_event_loop") and self._event_loop:
+                # Use the queuer's event loop if available
+                future = asyncio.run_coroutine_threadsafe(
+                    self._wait_for_job_finished_inner(job_rid, timeout_seconds),
+                    self._event_loop,
+                )
+                return future.result(timeout=timeout_seconds + 5.0)
+            else:
+                # Fallback to thread executor
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        self._wait_for_job_finished_inner(job_rid, timeout_seconds),
+                    )
+                    return future.result(timeout=timeout_seconds + 5.0)
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(
+                self._wait_for_job_finished_inner(job_rid, timeout_seconds)
+            )
 
     async def _wait_for_job_finished_inner(
         self, job_rid: UUID, timeout_seconds: float = 30.0
     ) -> Optional["Job"]:
         """
         Wait for a job to finish and return the job.
-        Listens for job delete events and returns the job when it is finished.
-        Mirrors Go's WaitForJobFinished method.
+        Uses a hybrid approach: quick polling combined with event listening for efficiency.
 
         Args:
             job_rid: The RID of the job to wait for
             timeout_seconds: Maximum time to wait for job to finish
 
         Returns:
-            The finished job, or None if cancelled or timeout
+            The finished job, or None if timeout
         """
-        if not hasattr(self, "job_delete_listener") or self.job_delete_listener is None:
-            logger.warning("Job delete listener not available")
-            return None
+        start_time = time.time()
+        check_interval = 0.1  # Check every 100ms initially
 
+        # First do some quick checks to see if job completes fast
+        for _ in range(
+            int(min(timeout_seconds * 10, 50))
+        ):  # Max 5 seconds of quick polling
+            try:
+                # Check if job is still in main table
+                job = self.db_job.select_job(job_rid)
+                if job and job.status in [
+                    JobStatus.SUCCEEDED,
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                ]:
+                    return job
+                elif not job:
+                    # Job not in main table, check archive
+                    archived_job = self.db_job.select_job_from_archive(job_rid)
+                    if archived_job:
+                        return archived_job
+
+                # Job still running, wait a bit
+                await asyncio.sleep(check_interval)
+
+            except Exception as e:
+                logger.debug(f"Error checking job {job_rid}: {e}")
+                await asyncio.sleep(check_interval)
+
+        # If we get here, try the listener approach for remaining time
+        remaining_time = timeout_seconds - (time.time() - start_time)
+        if (
+            remaining_time > 0
+            and hasattr(self, "job_delete_listener")
+            and self.job_delete_listener is not None
+        ):
+            return await self._wait_with_listener(job_rid, remaining_time)
+
+        # Final check before giving up
+        try:
+            job = self.db_job.select_job(job_rid)
+            if job and job.status in [
+                JobStatus.SUCCEEDED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            ]:
+                return job
+            archived_job = self.db_job.select_job_from_archive(job_rid)
+            if archived_job:
+                return archived_job
+        except Exception:
+            pass
+
+        logger.debug(
+            f"Timeout waiting for job {job_rid} to finish after {timeout_seconds} seconds"
+        )
+        return None
+
+    async def _wait_with_listener(
+        self, job_rid: UUID, timeout_seconds: float
+    ) -> Optional["Job"]:
+        """Wait for job completion using the listener approach."""
         job_finished = asyncio.Event()
         finished_job = None
 
@@ -223,17 +321,20 @@ class QueuerJobMixin:
             listener_thread = threading.Thread(target=listen_thread)
             listener_thread.start()
 
-            # Wait for listener to be ready
-            ready_event.wait(timeout=5.0)  # 5 second timeout for listener ready
+            # Wait for listener to be ready with timeout
+            if not ready_event.wait(timeout=2.0):
+                logger.debug(
+                    "Listener failed to become ready, falling back to final check"
+                )
+                stop_event.set()
+                listener_thread.join(timeout=1.0)
+                return None
 
             # Wait for specific job to be deleted/finished or timeout
             try:
                 await asyncio.wait_for(job_finished.wait(), timeout=timeout_seconds)
                 return finished_job
             except asyncio.TimeoutError:
-                logger.debug(
-                    f"Timeout waiting for job {job_rid} to finish after {timeout_seconds} seconds"
-                )
                 return None
             finally:
                 # Stop the listener
@@ -241,7 +342,7 @@ class QueuerJobMixin:
                 listener_thread.join(timeout=1.0)
 
         except Exception as e:
-            logger.error(f"Error waiting for job finished: {e}")
+            logger.debug(f"Error in listener approach: {e}")
             return None
 
     def cancel_job(self, job_rid: UUID) -> "Job":

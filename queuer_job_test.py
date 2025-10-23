@@ -335,10 +335,7 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
         self.queuer.add_task(task_mock)
 
         # Start the queuer
-        def cancel_func():
-            pass
-
-        self.queuer.start(cancel_func)
+        self.queuer.start()
 
     def tearDown(self):
         """Clean up after each test method."""
@@ -353,32 +350,23 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
         self.assertIsNotNone(job)
 
         # Wait for job to finish using the new method with timeout
-        try:
-            print(f"Waiting for job to finish: {job.rid}")
-            finished_job = self.queuer.wait_for_job_finished(
-                job.rid, timeout_seconds=5.0
-            )
-            print(f"Finished job: {finished_job}")
+        print(f"Waiting for job to finish: {job.rid}")
+        finished_job = self.queuer.wait_for_job_finished(
+            job.rid,
+            timeout_seconds=15.0,  # Increased timeout for better reliability under load
+        )
+        print(f"Finished job: {finished_job}")
 
-            if finished_job:
-                # Verify job finished successfully
-                self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
-                self.assertEqual(finished_job.results, 3)  # 1 + 2 = 3
+        # Verify job finished successfully
+        self.assertIsNotNone(
+            finished_job, "wait_for_job_finished should return the finished job"
+        )
+        self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
+        self.assertEqual(finished_job.results, 3)  # 1 + 2 = 3
 
-                # Verify job is no longer in main table
-                with self.assertRaises(Exception):
-                    self.queuer.get_job(job.rid)
-            else:
-                # If wait_for_job_finished returns None, check archive manually
-                time.sleep(1.0)
-                archived_job = self.queuer.db_job.select_job_from_archive(job.rid)
-                if archived_job:
-                    self.assertEqual(archived_job.status, JobStatus.SUCCEEDED)
-                    self.assertEqual(archived_job.results, 3)
-                else:
-                    self.skipTest("Job execution did not complete in time")
-        except Exception as e:
-            self.skipTest(f"Job execution test inconclusive: {e}")
+        # Verify job is no longer in main table (moved to archive)
+        with self.assertRaises(Exception):
+            self.queuer.get_job(job.rid)
 
 
 if __name__ == "__main__":

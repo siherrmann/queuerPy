@@ -32,18 +32,18 @@ class Runner:
         if not callable(task):
             raise ValueError("Task must be callable")
 
-        self.task = task
-        self.parameters = parameters or []
-        self.options = options or []
+        self.task: Callable = task
+        self.parameters: List[Any] = parameters or []
+        self.options: List[OnError] = options or []
 
         # Asyncio queues for results and cancellation
-        self.results_chan = asyncio.Queue()
-        self.cancel_chan = asyncio.Queue()
-        self.done_chan = asyncio.Queue()
+        self.results_chan: asyncio.Queue = asyncio.Queue()
+        self.cancel_chan: asyncio.Queue = asyncio.Queue()
+        self.done_chan: asyncio.Queue = asyncio.Queue()
 
         # Threading events for coordination
-        self._running = threading.Event()
-        self._cancelled = threading.Event()
+        self._running: threading.Event = threading.Event()
+        self._cancelled: threading.Event = threading.Event()
 
         # Event loop for async operations
         self._loop: Optional[asyncio.AbstractEventLoop] = None
