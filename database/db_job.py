@@ -130,7 +130,10 @@ class JobDBHandler:
 
             row = cur.fetchone()
             if row:
-                return self._row_to_job(row)
+                job_result = self._row_to_job(row)
+                # Commit the transaction to ensure the job is persisted
+                self.db.instance.commit()
+                return job_result
             else:
                 raise RuntimeError("Failed to insert job")
 

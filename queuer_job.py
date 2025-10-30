@@ -4,18 +4,21 @@ Mirrors Go's queuerJob.go functionality.
 """
 
 import asyncio
-import concurrent.futures
 import logging
 import threading
 import time
+from datetime import datetime
 from typing import List, Optional, Any, Union, Callable, TYPE_CHECKING
 from uuid import UUID
 
-from core.runner import Runner, new_runner_from_job
+from core.runner import Runner
+from core.process_runner import ProcessRunner, new_process_runner_from_job
 from core.retryer import Retryer
+from core.scheduler import Scheduler
 from helper.task import get_task_name_from_interface
 from model.job import Job, JobStatus, new_job as create_job
 from model.options import Options
+from core.runner import Runner
 
 if TYPE_CHECKING:
     from model.batch_job import BatchJob
@@ -68,17 +71,6 @@ class QueuerJobMixin:
             logger.error(f"Error adding job with options: {str(e)}")
             raise Exception(f"Adding job: {str(e)}")
 
-    def _add_job(self, task: str, options: dict, *parameters):
-        """Internal method to add a job."""
-        try:
-            # Create new job
-            new_job: Job = create_job(task, options, *parameters)
-            job: Job = self.db_job.insert_job(new_job)
-            return job
-
-        except Exception as e:
-            raise Exception(f"Creating or inserting job: {str(e)}")
-
     def add_jobs(self, batch_jobs: List["BatchJob"]) -> None:
         """
         Add a batch of jobs to the queue.
@@ -102,28 +94,20 @@ class QueuerJobMixin:
     def wait_for_job_added(self, timeout_seconds: float = 30.0) -> Optional["Job"]:
         """
         Wait for any job to start and return the job.
-        Handles event loop coordination properly.
+        Uses the shared Runner event loop.
         """
-        # Use existing event loop if available, otherwise create new one
-        try:
-            loop = asyncio.get_running_loop()
-            # We're in an async context, need to run in thread pool
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    asyncio.run, self._wait_for_job_added_inner(timeout_seconds)
-                )
-                return future.result(timeout=timeout_seconds + 5.0)
-        except RuntimeError:
-            # No running loop, safe to use asyncio.run
-            return asyncio.run(self._wait_for_job_added_inner(timeout_seconds))
+        runner = Runner()
+        return runner.run_async_task(
+            self._wait_for_job_added_inner(timeout_seconds),
+            timeout=timeout_seconds,
+        )
 
     async def _wait_for_job_added_inner(
         self, timeout_seconds: float = 30.0
     ) -> Optional["Job"]:
         """
         Wait for any job to start and return the job.
-        Listens for job insert events and returns the job when it is added to the queue.
-        Mirrors Go's WaitForJobAdded method.
+        Uses the broadcaster approach.
 
         Args:
             timeout_seconds: Maximum time to wait for a job to be added
@@ -131,219 +115,75 @@ class QueuerJobMixin:
         Returns:
             The job that was added, or None if cancelled or timeout
         """
-        if not hasattr(self, "job_insert_listener") or self.job_insert_listener is None:
-            logger.warning("Job insert listener not available")
+        if (
+            not hasattr(self, "job_insert_broadcaster")
+            or self.job_insert_broadcaster is None
+        ):
+            logger.warning("Job insert broadcaster not available")
             return None
 
-        job_added: asyncio.Event = asyncio.Event()
-        received_job: Optional[Job] = None
-
-        def on_job_added(job: Job) -> None:
-            nonlocal received_job
-            received_job = job
-            job_added.set()
-
-        # Create threading events for the listener
-        stop_event: threading.Event = threading.Event()
-        ready_event: threading.Event = threading.Event()
+        # Subscribe to the broadcaster
+        ch = await self.job_insert_broadcaster.subscribe()
 
         try:
-            # Start listening in a separate thread
-            def listen_thread():
-                try:
-                    self.job_insert_listener.listen(
-                        stop_event, ready_event, on_job_added
-                    )
-                except Exception as e:
-                    logger.error(f"Error listening for job inserts: {e}")
-
-            listener_thread = threading.Thread(target=listen_thread)
-            listener_thread.start()
-
-            # Wait for listener to be ready with longer timeout under load
-            if not ready_event.wait(timeout=10.0):  # Increased from 5.0 to 10.0 seconds
-                logger.warning(
-                    "Job insert listener failed to become ready within timeout"
-                )
-                stop_event.set()
-                listener_thread.join(timeout=1.0)
-                return None
-
-            # Wait for job to be added or timeout
-            try:
-                await asyncio.wait_for(job_added.wait(), timeout=timeout_seconds)
-                return received_job
-            except asyncio.TimeoutError:
-                logger.debug(
-                    f"Timeout waiting for job to be added after {timeout_seconds} seconds"
-                )
-                return None
-            finally:
-                # Stop the listener
-                stop_event.set()
-                listener_thread.join(timeout=1.0)
-
+            # Wait for job insertion with timeout
+            job = await asyncio.wait_for(ch.get(), timeout=timeout_seconds)
+            return job
+        except asyncio.TimeoutError:
+            logger.debug(
+                f"Timeout waiting for job to be added after {timeout_seconds} seconds"
+            )
+            return None
         except Exception as e:
             logger.error(f"Error waiting for job added: {e}")
             return None
+        finally:
+            # Unsubscribe from broadcaster
+            await self.job_insert_broadcaster.unsubscribe(ch)
 
     def wait_for_job_finished(
         self, job_rid: UUID, timeout_seconds: float = 30.0
     ) -> Optional["Job"]:
         """
         Wait for a job to finish and return the job.
-        Handles event loop coordination properly.
+        Uses the shared Runner event loop.
         """
-        # Check if we're in an event loop context
-        try:
-            loop = asyncio.get_running_loop()
-            # We're in an async context, use run_coroutine_threadsafe
-            if hasattr(self, "_event_loop") and self._event_loop:
-                # Use the queuer's event loop if available
-                future = asyncio.run_coroutine_threadsafe(
-                    self._wait_for_job_finished_inner(job_rid, timeout_seconds),
-                    self._event_loop,
-                )
-                return future.result(timeout=timeout_seconds + 5.0)
-            else:
-                # Fallback to thread executor
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run,
-                        self._wait_for_job_finished_inner(job_rid, timeout_seconds),
-                    )
-                    return future.result(timeout=timeout_seconds + 5.0)
-        except RuntimeError:
-            # No running loop, safe to use asyncio.run
-            return asyncio.run(
-                self._wait_for_job_finished_inner(job_rid, timeout_seconds)
-            )
-
-    async def _wait_for_job_finished_inner(
-        self, job_rid: UUID, timeout_seconds: float = 30.0
-    ) -> Optional["Job"]:
-        """
-        Wait for a job to finish and return the job.
-        Uses a hybrid approach: quick polling combined with event listening for efficiency.
-
-        Args:
-            job_rid: The RID of the job to wait for
-            timeout_seconds: Maximum time to wait for job to finish
-
-        Returns:
-            The finished job, or None if timeout
-        """
-        start_time = time.time()
-        check_interval = 0.1  # Check every 100ms initially
-
-        # First do some quick checks to see if job completes fast
-        for _ in range(
-            int(min(timeout_seconds * 10, 50))
-        ):  # Max 5 seconds of quick polling
-            try:
-                # Check if job is still in main table
-                job = self.db_job.select_job(job_rid)
-                if job and job.status in [
-                    JobStatus.SUCCEEDED,
-                    JobStatus.FAILED,
-                    JobStatus.CANCELLED,
-                ]:
-                    return job
-                elif not job:
-                    # Job not in main table, check archive
-                    archived_job = self.db_job.select_job_from_archive(job_rid)
-                    if archived_job:
-                        return archived_job
-
-                # Job still running, wait a bit
-                await asyncio.sleep(check_interval)
-
-            except Exception as e:
-                logger.debug(f"Error checking job {job_rid}: {e}")
-                await asyncio.sleep(check_interval)
-
-        # If we get here, try the listener approach for remaining time
-        remaining_time = timeout_seconds - (time.time() - start_time)
-        if (
-            remaining_time > 0
-            and hasattr(self, "job_delete_listener")
-            and self.job_delete_listener is not None
-        ):
-            return await self._wait_with_listener(job_rid, remaining_time)
-
-        # Final check before giving up
-        try:
-            job = self.db_job.select_job(job_rid)
-            if job and job.status in [
-                JobStatus.SUCCEEDED,
-                JobStatus.FAILED,
-                JobStatus.CANCELLED,
-            ]:
-                return job
-            archived_job = self.db_job.select_job_from_archive(job_rid)
-            if archived_job:
-                return archived_job
-        except Exception:
-            pass
-
-        logger.debug(
-            f"Timeout waiting for job {job_rid} to finish after {timeout_seconds} seconds"
+        runner = Runner()
+        return runner.run_async_task(
+            self._wait_with_listener(job_rid, timeout_seconds),
+            timeout=timeout_seconds,
         )
-        return None
 
     async def _wait_with_listener(
         self, job_rid: UUID, timeout_seconds: float
     ) -> Optional["Job"]:
-        """Wait for job completion using the listener approach."""
-        job_finished = asyncio.Event()
-        finished_job = None
+        """Wait for job completion using the broadcaster approach."""
+        # Check if broadcaster is available
+        if (
+            not hasattr(self, "job_delete_broadcaster")
+            or self.job_delete_broadcaster is None
+        ):
+            logger.debug(f"No job delete broadcaster available for job {job_rid}")
+            return None
 
-        def on_job_deleted(job):
-            nonlocal finished_job
-            if job.rid == job_rid:
-                finished_job = job
-                job_finished.set()
-
-        # Create threading events for the listener
-        stop_event = threading.Event()
-        ready_event = threading.Event()
+        # Subscribe to the broadcaster
+        ch = await self.job_delete_broadcaster.subscribe()
 
         try:
-            # Start listening in a separate thread
-            def listen_thread():
-                try:
-                    self.job_delete_listener.listen(
-                        stop_event, ready_event, on_job_deleted
-                    )
-                except Exception as e:
-                    logger.error(f"Error listening for job deletes: {e}")
-
-            listener_thread = threading.Thread(target=listen_thread)
-            listener_thread.start()
-
-            # Wait for listener to be ready with timeout
-            if not ready_event.wait(timeout=2.0):
-                logger.debug(
-                    "Listener failed to become ready, falling back to final check"
-                )
-                stop_event.set()
-                listener_thread.join(timeout=1.0)
-                return None
-
-            # Wait for specific job to be deleted/finished or timeout
-            try:
-                await asyncio.wait_for(job_finished.wait(), timeout=timeout_seconds)
-                return finished_job
-            except asyncio.TimeoutError:
-                return None
-            finally:
-                # Stop the listener
-                stop_event.set()
-                listener_thread.join(timeout=1.0)
-
-        except Exception as e:
-            logger.debug(f"Error in listener approach: {e}")
+            # Wait for job completion with timeout
+            while True:
+                job = await asyncio.wait_for(ch.get(), timeout=timeout_seconds)
+                if job.rid == job_rid:
+                    return job
+                # Continue waiting if it's a different job
+        except asyncio.TimeoutError:
             return None
+        except Exception as e:
+            logger.debug(f"Error in broadcaster approach: {e}")
+            return None
+        finally:
+            # Unsubscribe from broadcaster
+            await self.job_delete_broadcaster.unsubscribe(ch)
 
     def cancel_job(self, job_rid: UUID) -> "Job":
         """
@@ -533,6 +373,9 @@ class QueuerJobMixin:
             logger.debug("No worker available, skipping job run")
             return
 
+        logger.debug(f"Worker available_tasks: {self.worker.available_tasks}")
+        logger.debug(f"Worker max_concurrency: {self.worker.max_concurrency}")
+
         jobs = self.db_job.update_jobs_initial(self.worker)
         if not jobs:
             logger.debug("No jobs found to run")
@@ -540,19 +383,13 @@ class QueuerJobMixin:
 
         logger.info(f"Found {len(jobs)} jobs to run")
 
-        # Get the event loop stored during start() or current running loop
-        event_loop = getattr(self, "_event_loop", None)
-        if not event_loop:
-            try:
-                event_loop = asyncio.get_running_loop()
-                logger.debug("Using current running event loop for scheduled jobs")
-            except RuntimeError:
-                logger.error(
-                    "No event loop available for running async jobs - queuer not properly started"
-                )
-                raise RuntimeError(
-                    "Queuer not properly started: no event loop available"
-                )
+        # Get the shared Runner instance
+        runner = Runner()
+        if not runner.is_available():
+            logger.error(
+                "No event loop available for running async jobs - queuer not properly started"
+            )
+            raise RuntimeError("Queuer not properly started: no event loop available")
 
         for job in jobs:
             logger.info(f"Processing job: {job.rid}")
@@ -560,57 +397,26 @@ class QueuerJobMixin:
                 job.options
                 and job.options.schedule
                 and job.options.schedule.start
-                and job.options.schedule.start > time.time()
+                and job.options.schedule.start > datetime.now()
             ):
-                # Schedule the job for later
+                # Schedule the job for later using Scheduler - mirrors Go implementation
                 logger.info(
                     f"Scheduling job: {job.rid} for {job.options.schedule.start}"
                 )
 
-                async def run_scheduled_job():
-                    await asyncio.sleep(job.options.schedule.start - time.time())
-                    await self._run_job(job)
-
-                # Submit the coroutine to the main event loop
                 try:
-                    future = asyncio.run_coroutine_threadsafe(
-                        run_scheduled_job(), event_loop
+                    scheduler = Scheduler(
+                        job.options.schedule.start, self._run_job_sync, job
                     )
-
-                    # Add error handling for the scheduled task
-                    def handle_schedule_done(future_ref):
-                        try:
-                            exc = future_ref.exception()
-                            if exc is not None:
-                                logger.error(f"Scheduled task failed: {exc}")
-                        except Exception as e:
-                            logger.error(f"Error in schedule done callback: {e}")
-
-                    future.add_done_callback(handle_schedule_done)
+                    scheduler.go()
+                    logger.info(f"Job {job.rid} scheduled successfully using Scheduler")
                 except Exception as e:
-                    logger.error(f"Failed to schedule job: {e}")
+                    logger.error(f"Failed to schedule job with Scheduler: {e}")
             else:
                 # Run the job immediately
                 logger.info(f"Running job immediately: {job.rid}")
-                try:
-                    future = asyncio.run_coroutine_threadsafe(
-                        self._run_job(job), event_loop
-                    )
-
-                    # Add error handling for the task to prevent unawaited coroutine warnings
-                    def handle_task_done(future_ref):
-                        try:
-                            result = (
-                                future_ref.result()
-                            )  # Get result to check for exceptions
-                            logger.debug(f"Job {job.rid} completed successfully")
-                        except Exception as exc:
-                            logger.error(f"Background job task failed: {exc}")
-
-                    future.add_done_callback(handle_task_done)
-                    logger.debug(f"Submitted job {job.rid} to event loop")
-                except Exception as e:
-                    logger.error(f"Failed to run job: {e}")
+                runner = Runner()
+                runner.submit_async_task(self._run_job(job))
 
     async def _wait_for_job(
         self, job: "Job"
@@ -634,40 +440,16 @@ class QueuerJobMixin:
         if not callable(task):
             return None, False, Exception(f"Task is not callable: {job.task_name}")
 
-        # Use Runner architecture with proper event loop coordination
+        # Use ProcessRunner for CPU-intensive tasks
         try:
             logger.info(
-                f"Starting Runner for task {job.task_name} with parameters {job.parameters}"
+                f"Starting ProcessRunner for task {job.task_name} with parameters {job.parameters}"
             )
 
-            # Get the event loop stored during start() or current running loop
-            event_loop = getattr(self, "_event_loop", None)
-            if not event_loop:
-                try:
-                    event_loop = asyncio.get_running_loop()
-                    logger.debug(
-                        "Using current running event loop for Runner coordination"
-                    )
-                except RuntimeError:
-                    logger.warning(
-                        "No event loop available, falling back to direct execution"
-                    )
-                    # Fallback to direct execution
-                    if asyncio.iscoroutinefunction(task):
-                        results = await task(*job.parameters)
-                    else:
-                        loop = asyncio.get_running_loop()
-                        results = await loop.run_in_executor(
-                            None, task, *job.parameters
-                        )
-                    logger.info(
-                        f"Task {job.task_name} completed with results: {results}"
-                    )
-                    return results, False, None
+            # Use ProcessRunner for all job execution
+            runner = new_process_runner_from_job(task, job)
 
-            # Use Runner with event loop coordination
-            runner = new_runner_from_job(task, job)
-            logger.info(f"Created runner for job {job.rid}")
+            logger.info(f"Created process runner for job {job.rid}")
 
             # Store the runner for potential cancellation
             if not hasattr(self, "active_runners"):
@@ -679,24 +461,24 @@ class QueuerJobMixin:
                 if not runner.run():
                     return None, False, Exception("Failed to start runner")
 
-                # Create an async wrapper to get results from the runner
-                async def get_runner_results():
-                    # Submit the get_results call to the event loop from a thread
+                # For ProcessRunner, wrap get_results in executor
+                async def get_process_results():
                     def _get_results():
                         try:
-                            return runner.get_results(timeout=30)  # 30 second timeout
+                            return runner.get_results(
+                                timeout=300
+                            )  # 5 minute timeout for CPU work
                         except Exception as e:
-                            logger.error(f"Runner execution error: {e}")
+                            logger.error(f"ProcessRunner execution error: {e}")
                             raise
 
-                    # Run the sync get_results in the thread pool to avoid blocking
-                    loop = asyncio.get_running_loop()
+                    loop = Runner().get_event_loop()
                     return await loop.run_in_executor(None, _get_results)
 
-                # Wait for results
-                results = await get_runner_results()
+                results = await get_process_results()
+
                 logger.info(
-                    f"Runner task {job.task_name} completed with results: {results}"
+                    f"Process runner task {job.task_name} completed with results: {results}"
                 )
                 return results, False, None
 
@@ -771,6 +553,36 @@ class QueuerJobMixin:
             await self._retry_job(job, error)
         else:
             await self._succeed_job(job, results)
+
+    def _run_job_sync(self, job: "Job") -> None:
+        """
+        Synchronous wrapper for _run_job that can be called by the Scheduler.
+        Mirrors the Go pattern where scheduler calls the function directly.
+        """
+        try:
+            # Get the shared Runner instance
+            runner = Runner()
+            if not runner.is_available():
+                logger.error("No event loop available for scheduled job execution")
+                return
+
+            # Submit the async _run_job to the event loop
+            future = runner.submit_async_task(self._run_job(job))
+
+            # Don't wait for the result here since this is the scheduled execution
+            def handle_scheduled_done(future_ref):
+                try:
+                    exc = future_ref.exception()
+                    if exc is not None:
+                        logger.error(f"Scheduled job {job.rid} failed: {exc}")
+                except Exception as e:
+                    logger.error(f"Error in scheduled job done callback: {e}")
+
+            future.add_done_callback(handle_scheduled_done)
+            logger.info(f"Scheduled job {job.rid} submitted to event loop")
+
+        except Exception as e:
+            logger.error(f"Error executing scheduled job {job.rid}: {e}")
 
     def _cancel_job(self, job: "Job") -> None:
         """

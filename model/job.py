@@ -3,12 +3,12 @@ Job model for Python queuer implementation.
 Mirrors the Go Job struct with Python types and async compatibility.
 """
 
-import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Any, Optional, TYPE_CHECKING, Callable
 from uuid import UUID, uuid4
-from enum import Enum
+
+from helper.task import get_task_name_from_interface
 
 if TYPE_CHECKING:
     from .options import Options
@@ -93,8 +93,6 @@ class Job:
         job.task_name = data.get("task_name", "")
         job.parameters = data.get("parameters", [])
         if data.get("options"):
-            from .options import Options
-
             job.options = Options.from_dict(data["options"])
         job.status = data.get("status", JobStatus.QUEUED)
         if data.get("scheduled_at"):
@@ -129,9 +127,6 @@ def new_job(task: Callable, options: Optional["Options"] = None, *parameters) ->
         ValueError: If task is invalid or task name is too long
         TypeError: If task is not callable
     """
-    # Import here to avoid circular import
-    from helper.task import get_task_name_from_interface
-
     if not callable(task):
         raise TypeError("task must be callable")
 

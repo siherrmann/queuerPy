@@ -32,9 +32,9 @@ class WorkerDBHandler:
         # Load SQL functions using helper.sql
         connection: Connection = self.db.instance
         sql_loader: SQLLoader = SQLLoader()
-        sql_loader.load_notify_sql(
-            connection, with_table_drop
-        )  # Load notify function first
+
+        # NOTE: Don't load notify SQL here - it should only be loaded once by JobDBHandler
+        # Loading it here with table_drop=True would drop the triggers created by JobDBHandler
         sql_loader.load_worker_sql(connection, with_table_drop)
 
         # Create table if it doesn't exist

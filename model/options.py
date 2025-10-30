@@ -3,7 +3,6 @@ Options model for Python queuer implementation.
 Mirrors the Go Options struct with Python types.
 """
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
