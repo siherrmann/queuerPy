@@ -9,7 +9,8 @@ import pytest
 
 from database.db_listener import QueuerListener, new_queuer_db_listener
 from helper.database import DatabaseConfiguration
-from helper.test_database import PostgresTestContainer, DatabaseTestMixin
+from helper.test_database import DatabaseTestMixin
+from core.runner import Runner
 
 
 class TestAsyncQueuerListenerWithContainer(DatabaseTestMixin):
@@ -31,21 +32,19 @@ class TestAsyncQueuerListenerWithContainer(DatabaseTestMixin):
                     except Exception as e:
                         print(f"Error stopping listener: {e}")
 
-            # Run cleanup in event loop
+            # Use the Runner to handle async cleanup
             try:
-                loop = asyncio.get_event_loop()
-                if not loop.is_closed():
-                    loop.run_until_complete(stop_listeners())
-            except RuntimeError:
-                # Create new event loop if needed
-                asyncio.run(stop_listeners())
+                runner = Runner()
+                runner.run_async_task(stop_listeners())
+            except Exception as e:
+                print(f"Error during async cleanup: {e}")
 
         super().teardown_method(method)
 
     @pytest.mark.asyncio
     async def test_new_queuer_db_listener_real_connection(self):
         """Test creating async listener with real database connection."""
-        config = self.postgres_container.get_config()
+        config = self.db_config
 
         listener = new_queuer_db_listener(config, "test_channel")
         self._test_listeners.append(listener)
@@ -62,7 +61,7 @@ class TestAsyncQueuerListenerWithContainer(DatabaseTestMixin):
         async def callback(payload):
             received_notifications.append(payload)
 
-        config = self.postgres_container.get_config()
+        config = self.db_config
 
         # Create listener
         listener = new_queuer_db_listener(config, "test_channel")

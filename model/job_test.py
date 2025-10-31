@@ -6,7 +6,6 @@ Mirrors Go's model/job_test.go functionality.
 import time
 import unittest
 from datetime import datetime, timedelta
-from typing import Any
 
 from model.job import Job, new_job, JobStatus
 from model.options import Options, Schedule
@@ -21,13 +20,13 @@ def task_mock(duration: int, param2: str) -> int:
     """
     # Simulate some work
     time.sleep(duration)
-    
+
     # Example for some error handling
     try:
         param2_int = int(param2)
     except ValueError as e:
         raise ValueError(f"Cannot convert {param2} to integer") from e
-    
+
     return duration + param2_int
 
 
@@ -42,10 +41,10 @@ task_mock_with_name_longer_100.__name__ = "TaskMockWithNameLonger100_28303234363
 
 class TestJob(unittest.TestCase):
     """Test cases for Job model."""
-    
+
     def test_new_job(self):
         """Test NewJob function with various parameters."""
-        
+
         test_cases = [
             {
                 "name": "Valid nil options",
@@ -139,7 +138,7 @@ class TestJob(unittest.TestCase):
                 "want_err": True,
             },
         ]
-        
+
         for test_case in test_cases:
             with self.subTest(name=test_case["name"]):
                 try:
@@ -149,20 +148,34 @@ class TestJob(unittest.TestCase):
                         options = test_case["create_options"]()
                     else:
                         options = test_case.get("options")
-                    
+
                     job = new_job(test_case["task"], options, *test_case["parameters"])
-                    
+
                     if test_case["want_err"]:
-                        self.fail(f"NewJob should return an error for {test_case['name']}")
+                        self.fail(
+                            f"NewJob should return an error for {test_case['name']}"
+                        )
                     else:
-                        self.assertIsNotNone(job, "Job should not be None for valid options")
-                        self.assertEqual(options, job.options, "Job options should match the provided options")
-                        self.assertEqual(test_case["parameters"], job.parameters, "Job parameters should match the provided parameters")
-                        
+                        self.assertIsNotNone(
+                            job, "Job should not be None for valid options"
+                        )
+                        self.assertEqual(
+                            options,
+                            job.options,
+                            "Job options should match the provided options",
+                        )
+                        self.assertEqual(
+                            test_case["parameters"],
+                            job.parameters,
+                            "Job parameters should match the provided parameters",
+                        )
+
                 except Exception as e:
                     if not test_case["want_err"]:
-                        self.fail(f"NewJob should not return an error for {test_case['name']}: {e}")
-    
+                        self.fail(
+                            f"NewJob should not return an error for {test_case['name']}: {e}"
+                        )
+
     def test_job_from_notification_to_job(self):
         """Test converting job notification data to Job object."""
         # This would test the notification parsing functionality
@@ -172,53 +185,53 @@ class TestJob(unittest.TestCase):
         job.task_name = "test_task"
         job.status = JobStatus.QUEUED
         job.parameters = [1, "test"]
-        
+
         self.assertEqual(job.id, 1)
         self.assertEqual(job.task_name, "test_task")
         self.assertEqual(job.status, JobStatus.QUEUED)
         self.assertEqual(job.parameters, [1, "test"])
-    
+
     def test_marshal_and_unmarshal_parameters(self):
         """Test parameter marshaling and unmarshaling."""
         original_params = [1, "test", 3.14, True, {"key": "value"}]
-        
+
         # Create a job with parameters
         job = Job()
         job.parameters = original_params
-        
+
         # In a real implementation, we'd test JSON serialization/deserialization
         # For now, just verify the parameters are stored correctly
         self.assertEqual(job.parameters, original_params)
-    
+
     def test_parameters_to_reflect_values(self):
         """Test converting parameters to reflection values (Python equivalent)."""
         params = [1, "test", 3.14, True]
         job = Job()
         job.parameters = params
-        
+
         # Test that parameters can be accessed as expected
         self.assertEqual(len(job.parameters), 4)
         self.assertEqual(job.parameters[0], 1)
         self.assertEqual(job.parameters[1], "test")
         self.assertEqual(job.parameters[2], 3.14)
         self.assertEqual(job.parameters[3], True)
-    
+
     def test_marshal_and_unmarshal_db_time(self):
         """Test datetime marshaling and unmarshaling for database operations."""
         now = datetime.now()
-        
+
         job = Job()
         job.created_at = now
         job.updated_at = now
         job.started_at = now
         job.scheduled_at = now
-        
+
         # Verify datetime objects are stored correctly
         self.assertEqual(job.created_at, now)
         self.assertEqual(job.updated_at, now)
         self.assertEqual(job.started_at, now)
         self.assertEqual(job.scheduled_at, now)
-    
+
     def test_job_status_enum(self):
         """Test JobStatus enum values."""
         self.assertEqual(JobStatus.QUEUED, "QUEUED")
@@ -226,11 +239,11 @@ class TestJob(unittest.TestCase):
         self.assertEqual(JobStatus.SUCCEEDED, "SUCCEEDED")
         self.assertEqual(JobStatus.FAILED, "FAILED")
         self.assertEqual(JobStatus.CANCELLED, "CANCELLED")
-    
+
     def test_job_defaults(self):
         """Test default values for Job object."""
         job = Job()
-        
+
         self.assertEqual(job.id, 0)
         self.assertIsNotNone(job.rid)  # Should have a UUID
         self.assertEqual(job.status, JobStatus.QUEUED)

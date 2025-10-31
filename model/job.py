@@ -3,15 +3,14 @@ Job model for Python queuer implementation.
 Mirrors the Go Job struct with Python types and async compatibility.
 """
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Any, Optional, TYPE_CHECKING, Callable
+from typing import List, Any, Optional, Callable, Dict
 from uuid import UUID, uuid4
 
 from helper.task import get_task_name_from_interface
-
-if TYPE_CHECKING:
-    from .options import Options
+from .options import Options
 
 
 # Job status constants to match Go
@@ -42,7 +41,7 @@ class Job:
     # Job definition
     task_name: str = ""
     parameters: List[Any] = field(default_factory=list)
-    options: Optional["Options"] = None
+    options: Optional[Options] = None
 
     # Job state
     status: str = JobStatus.QUEUED
@@ -109,8 +108,62 @@ class Job:
             job.updated_at = datetime.fromisoformat(data["updated_at"])
         return job
 
+    @classmethod
+    def from_row(cls, row: Dict[str, Any]) -> "Job":
+        """Create job from database row."""
+        job = cls()
+        job.id = row.get("id", 0)
 
-def new_job(task: Callable, options: Optional["Options"] = None, *parameters) -> Job:
+        # Handle UUID fields - they may come as UUID objects or strings
+        if row.get("rid"):
+            job.rid = row["rid"] if isinstance(row["rid"], UUID) else UUID(row["rid"])
+
+        job.worker_id = row.get("worker_id", 0)
+
+        if row.get("worker_rid"):
+            job.worker_rid = (
+                row["worker_rid"]
+                if isinstance(row["worker_rid"], UUID)
+                else UUID(row["worker_rid"])
+            )
+
+        job.task_name = row.get("task_name", "")
+        job.status = row.get("status", JobStatus.QUEUED)
+        job.scheduled_at = row.get("scheduled_at")
+        job.started_at = row.get("started_at")
+        job.schedule_count = row.get("schedule_count", 0)
+        job.attempts = row.get("attempts", 0)
+        job.error = row.get("error", "")
+        job.created_at = row.get("created_at", datetime.now())
+        job.updated_at = row.get("updated_at", datetime.now())
+
+        # Parse JSON fields
+        if row.get("parameters"):
+            job.parameters = (
+                json.loads(row["parameters"])
+                if isinstance(row["parameters"], str)
+                else row["parameters"]
+            )
+
+        if row.get("results"):
+            job.results = (
+                json.loads(row["results"])
+                if isinstance(row["results"], str)
+                else row["results"]
+            )
+
+        if row.get("options"):
+            options_data = (
+                json.loads(row["options"])
+                if isinstance(row["options"], str)
+                else row["options"]
+            )
+            job.options = Options.from_dict(options_data)
+
+        return job
+
+
+def new_job(task: Callable, options: Optional[Options] = None, *parameters) -> Job:
     """
     Create a new job from a task function.
     Mirrors Go's NewJob function.

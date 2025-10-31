@@ -13,7 +13,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from queuer import new_queuer
+from queuer import new_queuer, new_queuer_with_db
 from model.job import Job, JobStatus
 from model.options import Options
 from model.options_on_error import OnError, RetryBackoff
@@ -323,13 +323,8 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
         """Set up test fixtures."""
         super().setup_method()
 
-        # Create queuer with real database handlers
-        self.queuer = new_queuer("TestQueuerRunning", 100)
-        self.queuer.db_worker = WorkerDBHandler(self.db, with_table_drop=True)
-        self.queuer.db_job = JobDBHandler(self.db, with_table_drop=True)
-
-        # Re-insert the worker since we changed the database handlers
-        self.queuer.worker = self.queuer.db_worker.insert_worker(self.queuer.worker)
+        # Create queuer with the test database configuration to ensure consistency
+        self.queuer = new_queuer_with_db("TestQueuerRunning", 100, "", self.db_config)
 
         # Add test tasks
         self.queuer.add_task(task_mock)
@@ -381,8 +376,11 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
         if finished_job is not None:
             self.assertEqual(finished_job.status, "SUCCEEDED")
             self.assertEqual(finished_job.results, 3)
-        self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
-        self.assertEqual(finished_job.results, 3)  # 1 + 2 = 3
+            self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
+            self.assertEqual(finished_job.results, 3)  # 1 + 2 = 3
+        else:
+            # If we get here, the job didn't complete even in the database
+            self.fail("Job did not complete within the expected time frame")
 
         # Verify job is no longer in main table (moved to archive)
         with self.assertRaises(Exception):

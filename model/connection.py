@@ -4,7 +4,6 @@ Mirrors Go's model.Connection struct.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -13,6 +12,7 @@ class Connection:
     Represents a database connection with its details.
     Used to monitor and manage active connections to the database.
     """
+
     pid: int
     database: str
     username: str

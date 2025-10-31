@@ -14,11 +14,12 @@ class Task:
     Task represents a job task with its function, name, and parameters.
     Mirrors the Go Task struct for compatibility.
     """
+
     task: Callable = None
     name: str = ""
     input_parameters: List[Type] = field(default_factory=list)
     output_parameters: List[Type] = field(default_factory=list)
-    
+
     def __post_init__(self):
         """Initialize parameter types from the function signature."""
         if callable(self.task):
@@ -42,10 +43,10 @@ def get_task_name_from_function(task: Callable) -> str:
     """
     if not callable(task):
         raise ValueError("task must be callable")
-    
-    if hasattr(task, '__name__'):
+
+    if hasattr(task, "__name__"):
         return task.__name__
-    elif hasattr(task, '__class__'):
+    elif hasattr(task, "__class__"):
         return task.__class__.__name__
     else:
         return str(task)
@@ -67,8 +68,8 @@ def new_task_with_name(task: Callable, task_name: str) -> Task:
     """
     if not task_name or len(task_name) > 100:
         raise ValueError("task_name must have a length between 1 and 100")
-    
+
     if not callable(task):
         raise ValueError("task must be callable")
-    
+
     return Task(task=task, name=task_name)

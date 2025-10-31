@@ -87,7 +87,7 @@ class WorkerDBHandler:
 
             row = cur.fetchone()
             if row:
-                return self._row_to_worker(row)
+                return Worker.from_row(row)
             else:
                 raise RuntimeError("Failed to insert worker")
 
@@ -114,7 +114,7 @@ class WorkerDBHandler:
 
             row = cur.fetchone()
             if row:
-                return self._row_to_worker(row)
+                return Worker.from_row(row)
             else:
                 raise RuntimeError("Failed to update worker")
 
@@ -150,39 +150,3 @@ class WorkerDBHandler:
                 (rid,),
             )
             return cur.rowcount
-
-    def _row_to_worker(self, row: Dict[str, Any]) -> Worker:
-        """Convert database row to Worker object."""
-        worker = Worker()
-        worker.id = row.get("output_id", 0)
-
-        # Handle UUID fields
-        if row.get("output_rid"):
-            worker.rid = (
-                row["output_rid"]
-                if isinstance(row["output_rid"], UUID)
-                else UUID(row["output_rid"])
-            )
-
-        worker.name = row.get("output_name", "")
-        worker.max_concurrency = row.get("output_max_concurrency", 1)
-        worker.available_tasks = row.get("output_available_tasks", []) or []
-        worker.available_next_interval_funcs = (
-            row.get("output_available_next_interval", []) or []
-        )
-        worker.status = row.get("output_status", WorkerStatus.READY)
-        worker.created_at = row.get("output_created_at", datetime.now())
-        worker.updated_at = row.get("output_updated_at", datetime.now())
-
-        # Parse options if present
-        if row.get("output_options"):
-            from model.options_on_error import OnError
-
-            options_data = (
-                json.loads(row["output_options"])
-                if isinstance(row["output_options"], str)
-                else row["output_options"]
-            )
-            worker.options = OnError.from_dict(options_data)
-
-        return worker

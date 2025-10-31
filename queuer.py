@@ -361,7 +361,7 @@ class Queuer(
     def _start_listeners(self) -> None:
         """Start database listeners."""
 
-        def handle_job_notification(notification):
+        async def handle_job_notification(notification):
             """Handle job database notifications."""
             try:
                 self.log.info(f"=== JOB NOTIFICATION RECEIVED ===")
@@ -383,12 +383,9 @@ class Queuer(
                         hasattr(self, "job_delete_broadcaster")
                         and self.job_delete_broadcaster
                     ):
-                        # Use the queuer's event loop consistently
+                        # Now we can directly await the broadcast since we're in an async context
                         try:
-                            future = Runner().run_in_event_loop(
-                                self.job_delete_broadcaster.broadcast(job)
-                            )
-                            # Don't wait for the broadcast to complete, just fire and forget
+                            await self.job_delete_broadcaster.broadcast(job)
                         except Exception as e:
                             self.log.error(f"Error broadcasting job delete: {e}")
                 else:

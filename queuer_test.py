@@ -485,7 +485,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             ORDER BY tgname;
             """
 
-            triggers = queuer1.db_job.execute_query(trigger_check)
+            triggers = queuer1.db_job.db.instance.execute(trigger_check).fetchall()
             self.assertGreaterEqual(
                 len(triggers),
                 2,
@@ -548,7 +548,9 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             self.assertEqual(finished_job3.results, "Processed: Cross-queuer test")
 
             # Verify the notification system worked by checking that triggers are still present
-            triggers_after = queuer1.db_job.execute_query(trigger_check)
+            triggers_after = queuer1.db_job.db.instance.execute(
+                trigger_check
+            ).fetchall()
             self.assertGreaterEqual(
                 len(triggers_after),
                 2,
@@ -588,7 +590,9 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             ORDER BY tgname;
             """
 
-            initial_triggers = queuer.db_job.execute_query(trigger_check)
+            initial_triggers = queuer.db_job.db.instance.execute(
+                trigger_check
+            ).fetchall()
             self.assertGreaterEqual(
                 len(initial_triggers), 2, "Should have notification triggers initially"
             )
@@ -628,7 +632,9 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
                 )
 
                 # Verify triggers still exist
-                current_triggers = queuer.db_job.execute_query(trigger_check)
+                current_triggers = queuer.db_job.db.instance.execute(
+                    trigger_check
+                ).fetchall()
                 self.assertGreaterEqual(
                     len(current_triggers),
                     2,
@@ -636,7 +642,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
                 )
 
             # Final verification that the system is stable
-            final_triggers = queuer.db_job.execute_query(trigger_check)
+            final_triggers = queuer.db_job.db.instance.execute(trigger_check).fetchall()
             self.assertEqual(
                 len(final_triggers),
                 len(initial_triggers),

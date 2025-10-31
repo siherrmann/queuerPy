@@ -130,7 +130,7 @@ class JobDBHandler:
 
             row = cur.fetchone()
             if row:
-                job_result = self._row_to_job(row)
+                job_result = Job.from_row(row)
                 # Commit the transaction to ensure the job is persisted
                 self.db.instance.commit()
                 return job_result
@@ -153,7 +153,7 @@ class JobDBHandler:
 
             jobs = []
             for row in cur.fetchall():
-                jobs.append(self._row_to_job(row))
+                jobs.append(Job.from_row(row))
 
             return jobs
 
@@ -186,7 +186,7 @@ class JobDBHandler:
 
             row = cur.fetchone()
             if row:
-                return self._row_to_job(row)
+                return Job.from_row(row)
             else:
                 raise RuntimeError("Failed to update job")
 
@@ -201,7 +201,7 @@ class JobDBHandler:
             )
 
             row = cur.fetchone()
-            return self._row_to_job(row) if row else None
+            return Job.from_row(row) if row else None
 
     def select_job_from_archive(self, rid: UUID) -> Optional[Job]:
         """Select a job from archive by RID."""
@@ -214,7 +214,7 @@ class JobDBHandler:
             )
 
             row = cur.fetchone()
-            return self._row_to_job(row) if row else None
+            return Job.from_row(row) if row else None
 
     def select_all_jobs(self, last_id: int = 0, entries: int = 100) -> List[Job]:
         """Select all jobs with pagination."""
@@ -231,7 +231,7 @@ class JobDBHandler:
 
             jobs = []
             for row in cur.fetchall():
-                jobs.append(self._row_to_job(row))
+                jobs.append(Job.from_row(row))
 
             return jobs
 
@@ -252,7 +252,7 @@ class JobDBHandler:
 
             jobs = []
             for row in cur.fetchall():
-                jobs.append(self._row_to_job(row))
+                jobs.append(Job.from_row(row))
 
             return jobs
 
@@ -276,58 +276,3 @@ class JobDBHandler:
             """
             )
             return cur.rowcount
-
-    def _row_to_job(self, row: Dict[str, Any]) -> Job:
-        """Convert database row to Job object."""
-        job = Job()
-        job.id = row.get("id", 0)
-
-        # Handle UUID fields - they may come as UUID objects or strings
-        if row.get("rid"):
-            job.rid = row["rid"] if isinstance(row["rid"], UUID) else UUID(row["rid"])
-
-        job.worker_id = row.get("worker_id", 0)
-
-        if row.get("worker_rid"):
-            job.worker_rid = (
-                row["worker_rid"]
-                if isinstance(row["worker_rid"], UUID)
-                else UUID(row["worker_rid"])
-            )
-
-        job.task_name = row.get("task_name", "")
-        job.status = row.get("status", JobStatus.QUEUED)
-        job.scheduled_at = row.get("scheduled_at")
-        job.started_at = row.get("started_at")
-        job.schedule_count = row.get("schedule_count", 0)
-        job.attempts = row.get("attempts", 0)
-        job.error = row.get("error", "")
-        job.created_at = row.get("created_at", datetime.now())
-        job.updated_at = row.get("updated_at", datetime.now())
-
-        # Parse JSON fields
-        if row.get("parameters"):
-            job.parameters = (
-                json.loads(row["parameters"])
-                if isinstance(row["parameters"], str)
-                else row["parameters"]
-            )
-
-        if row.get("results"):
-            job.results = (
-                json.loads(row["results"])
-                if isinstance(row["results"], str)
-                else row["results"]
-            )
-
-        if row.get("options"):
-            from model.options import Options
-
-            options_data = (
-                json.loads(row["options"])
-                if isinstance(row["options"], str)
-                else row["options"]
-            )
-            job.options = Options.from_dict(options_data)
-
-        return job
