@@ -6,7 +6,7 @@ Mirrors the Go Job struct with Python types and async compatibility.
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Any, Optional, Callable, Dict
+from typing import List, Any, Optional, Callable, Dict, Union
 from uuid import UUID, uuid4
 
 from helper.task import get_task_name_from_interface
@@ -36,7 +36,7 @@ class Job:
 
     # Worker association
     worker_id: int = 0
-    worker_rid: UUID = field(default_factory=uuid4)
+    worker_rid: Optional[UUID] = None
 
     # Job definition
     task_name: str = ""
@@ -145,7 +145,7 @@ class Job:
                 else row["parameters"]
             )
 
-        if row.get("results"):
+        if row.get("results") is not None:
             job.results = (
                 json.loads(row["results"])
                 if isinstance(row["results"], str)
@@ -163,13 +163,15 @@ class Job:
         return job
 
 
-def new_job(task: Callable, options: Optional[Options] = None, *parameters) -> Job:
+def new_job(
+    task: Union[Callable, str], options: Optional[Options] = None, *parameters
+) -> Job:
     """
-    Create a new job from a task function.
+    Create a new job from a task function or task name.
     Mirrors Go's NewJob function.
 
     Args:
-        task: The task function to execute
+        task: The task function to execute or task name string
         options: Optional job options (OnError, Schedule, etc.)
         *parameters: Variable number of parameters to pass to the task
 
@@ -178,12 +180,16 @@ def new_job(task: Callable, options: Optional[Options] = None, *parameters) -> J
 
     Raises:
         ValueError: If task is invalid or task name is too long
-        TypeError: If task is not callable
+        TypeError: If task is not callable and not a string
     """
-    if not callable(task):
-        raise TypeError("task must be callable")
+    # Handle both callable tasks and string task names
+    if callable(task):
+        task_name: str = get_task_name_from_interface(task)
+    elif isinstance(task, str):
+        task_name: str = task
+    else:
+        raise TypeError("task must be callable or a string task name")
 
-    task_name: str = get_task_name_from_interface(task)
     if not task_name or len(task_name) > 100:
         raise ValueError("task name must have a length between 1 and 100")
 

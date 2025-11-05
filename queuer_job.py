@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from typing import List, Optional, Any, Union, Callable, TYPE_CHECKING
 from uuid import UUID
+from psycopg.rows import dict_row
 
 from core.runner import Runner
 from core.process_runner import ProcessRunner, new_process_runner_from_job
@@ -54,7 +55,9 @@ class QueuerJobMixin:
 
         return job
 
-    def add_job_with_options(self, options: dict, task: str, *parameters):
+    def add_job_with_options(
+        self, options: dict, task: Union[Callable, str], *parameters
+    ):
         """Add a new job with specific options."""
         # Merge default options with provided options
         options: Optional[Options] = self._merge_options(options)
@@ -149,41 +152,77 @@ class QueuerJobMixin:
         Uses the shared Runner event loop.
         """
         runner = Runner()
+        # Add buffer to runner timeout to allow async method final check to complete
+        runner_timeout = timeout_seconds + 1.0
         return runner.run_async_task(
             self._wait_with_listener(job_rid, timeout_seconds),
-            timeout=timeout_seconds,
+            timeout=runner_timeout,
         )
 
     async def _wait_with_listener(
         self, job_rid: UUID, timeout_seconds: float
     ) -> Optional["Job"]:
-        """Wait for job completion using the broadcaster approach."""
-        # Check if broadcaster is available
+        """Wait for job completion using pure database notifications."""
+
+        # Check if job is already completed in archive
+        def check_archive():
+            with self.db_job.db.instance.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT * FROM job_archive WHERE rid = %s ORDER BY updated_at DESC LIMIT 1",
+                    (job_rid,),
+                )
+                row = cur.fetchone()
+                if row:
+                    from model.job import Job
+
+                    return Job.from_row(row)
+                return None
+
+        # First check for immediate completion
+        completed_job = check_archive()
+        if completed_job:
+            return completed_job
+
+        # Job not in archive yet, wait for notification
         if (
             not hasattr(self, "job_delete_broadcaster")
             or self.job_delete_broadcaster is None
         ):
-            logger.debug(f"No job delete broadcaster available for job {job_rid}")
             return None
 
-        # Subscribe to the broadcaster
-        ch = await self.job_delete_broadcaster.subscribe()
-
+        channel = None
         try:
-            # Wait for job completion with timeout
+            # Subscribe to job delete notifications (job completion)
+            channel = await self.job_delete_broadcaster.subscribe()
+
+            # Check archive again in case job completed during subscription
+            completed_job = check_archive()
+            if completed_job:
+                return completed_job
+
+            # Wait for the specific job notification
             while True:
-                job = await asyncio.wait_for(ch.get(), timeout=timeout_seconds)
-                if job.rid == job_rid:
-                    return job
-                # Continue waiting if it's a different job
+                completed_job = await asyncio.wait_for(
+                    channel.get(), timeout=timeout_seconds
+                )
+
+                # Check if this is the job we're waiting for
+                if completed_job.rid == job_rid:
+                    return completed_job
+                # Continue waiting for our specific job if it's a different one
+
         except asyncio.TimeoutError:
-            return None
-        except Exception as e:
-            logger.debug(f"Error in broadcaster approach: {e}")
+            # Final check before giving up
+            return check_archive()
+        except Exception:
             return None
         finally:
-            # Unsubscribe from broadcaster
-            await self.job_delete_broadcaster.unsubscribe(ch)
+            # Cleanup subscription
+            if channel:
+                try:
+                    await self.job_delete_broadcaster.unsubscribe(channel)
+                except Exception:
+                    pass
 
     def cancel_job(self, job_rid: UUID) -> "Job":
         """
@@ -359,6 +398,16 @@ class QueuerJobMixin:
             # Create new job with proper parameter order
             new_job = create_job(task, options, *parameters)
             job = self.db_job.insert_job(new_job)
+
+            # IMMEDIATE PROCESSING - NO POLLING: Process jobs immediately after insertion
+            # This ensures pure notification-driven operation without waiting for notifications
+            logger.debug("Triggering immediate job processing after insertion")
+            try:
+                self._run_job_initial()
+            except Exception as e:
+                logger.warning(f"Error in immediate job processing: {e}")
+                # Don't fail job creation if processing fails
+
             return job
 
         except Exception as e:
@@ -371,6 +420,11 @@ class QueuerJobMixin:
         """
         if not self.worker:
             logger.debug("No worker available, skipping job run")
+            return
+
+        # Check if database connection is available
+        if not self.db_job or not self.db_job.db or not self.db_job.db.instance:
+            logger.debug("Database connection unavailable, skipping job run")
             return
 
         logger.debug(f"Worker available_tasks: {self.worker.available_tasks}")
@@ -440,7 +494,7 @@ class QueuerJobMixin:
         if not callable(task):
             return None, False, Exception(f"Task is not callable: {job.task_name}")
 
-        # Use ProcessRunner for CPU-intensive tasks
+        # Use ProcessRunner for better cancellation control
         try:
             logger.info(
                 f"Starting ProcessRunner for task {job.task_name} with parameters {job.parameters}"
@@ -488,7 +542,9 @@ class QueuerJobMixin:
                     runner.cancel()
                 return None, True, None
             except Exception as e:
-                logger.error(f"Runner task {job.task_name} failed with error: {e}")
+                logger.error(
+                    f"Process runner task {job.task_name} failed with error: {e}"
+                )
                 return None, False, e
             finally:
                 # Clean up runner reference
@@ -592,6 +648,16 @@ class QueuerJobMixin:
             job: The job to cancel
         """
         if job.status in [JobStatus.RUNNING, JobStatus.SCHEDULED, JobStatus.QUEUED]:
+            # Cancel the running process if it exists
+            if hasattr(self, "active_runners") and job.rid in self.active_runners:
+                runner = self.active_runners[job.rid]
+                if runner.cancel():
+                    logger.info(f"Cancelled running process for job: {job.rid}")
+                else:
+                    logger.warning(
+                        f"Failed to cancel running process for job: {job.rid}"
+                    )
+
             job.status = JobStatus.CANCELLED
             try:
                 self.db_job.update_job_final(job)
@@ -631,6 +697,11 @@ class QueuerJobMixin:
             job: The job to end
         """
         if not self.worker or job.worker_id != self.worker.id:
+            return
+
+        # Check if database connection is available
+        if not self.db_job or not self.db_job.db or not self.db_job.db.instance:
+            logger.error(f"Database connection unavailable for job {job.rid}")
             return
 
         try:
@@ -673,6 +744,8 @@ class QueuerJobMixin:
 
         # Try to run the next job in the queue
         try:
-            self._run_job_initial()
+            # Only run next job if we have valid database connection
+            if self.db_job and self.db_job.db and self.db_job.db.instance:
+                self._run_job_initial()
         except Exception as e:
             logger.error(f"Error running next job: {e}")

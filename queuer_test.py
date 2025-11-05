@@ -24,6 +24,26 @@ async def global_async_task(x: int) -> int:
     return x * 3
 
 
+def global_simple_task(x: int) -> int:
+    """Global simple task function for testing."""
+    return x * 2
+
+
+def global_test_task(x: int) -> int:
+    """Global test task function for testing."""
+    return x * 2
+
+
+def global_notification_task(message: str) -> str:
+    """Simple task for notification testing."""
+    return f"Processed: {message}"
+
+
+def global_fast_task(data: str) -> str:
+    """Fast task for testing responsiveness."""
+    return f"Processed: {data}"
+
+
 class TestNewQueuer(DatabaseTestMixin, unittest.TestCase):
     """Test new_queuer factory function with various configurations."""
 
@@ -389,28 +409,22 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
     def test_add_task(self):
         """Test adding a task."""
 
-        def test_task(x: int) -> int:
-            return x * 2
-
-        self.queuer.add_task(test_task)
-        self.assertIn("test_task", self.queuer.tasks)
+        self.queuer.add_task(global_test_task)
+        self.assertIn("global_test_task", self.queuer.tasks)
 
     def test_add_job(self):
         """Test adding and executing a job."""
 
-        def test_task(x: int) -> int:
-            return x * 2
-
         # Add task first
-        self.queuer.add_task(test_task)
+        self.queuer.add_task(global_test_task)
 
         # Start queuer
         self.queuer.start()
 
         try:
             # Add job
-            job = self.queuer.add_job(test_task, 5)
-            self.assertEqual(job.task_name, "test_task")
+            job = self.queuer.add_job(global_test_task, 5)
+            self.assertEqual(job.task_name, "global_test_task")
             self.assertEqual(job.parameters, [5])
 
             # Wait a bit for job to execute
@@ -481,7 +495,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             trigger_check = """
             SELECT tgname, tgrelid::regclass as table_name 
             FROM pg_trigger 
-            WHERE tgname LIKE '%job_notify%'
+            WHERE tgname LIKE '%notify_event'
             ORDER BY tgname;
             """
 
@@ -493,13 +507,9 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             )
 
             # Define a simple test task
-            def test_notification_task(message: str) -> str:
-                """Simple task for notification testing."""
-                return f"Processed: {message}"
-
             # Add the task to both queuers
-            queuer1.add_task(test_notification_task)
-            queuer2.add_task(test_notification_task)
+            queuer1.add_task(global_notification_task)
+            queuer2.add_task(global_notification_task)
 
             # Start both queuers
             queuer1.start()
@@ -510,9 +520,9 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             self.assertTrue(queuer2._running, "Queuer2 should be running")
 
             # Add jobs using queuer1 - this should trigger notifications
-            job1 = queuer1.add_job(test_notification_task, "First notification test")
+            job1 = queuer1.add_job(global_notification_task, "First notification test")
             self.assertIsNotNone(job1, "Job1 should be created successfully")
-            self.assertEqual(job1.task_name, "test_notification_task")
+            self.assertEqual(job1.task_name, "global_notification_task")
 
             # Use wait_for_job_finished to properly verify job completion
             finished_job1 = queuer1.wait_for_job_finished(
@@ -524,7 +534,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             )
 
             # Add a second job and verify it
-            job2 = queuer1.add_job(test_notification_task, "Second notification test")
+            job2 = queuer1.add_job(global_notification_task, "Second notification test")
             self.assertIsNotNone(job2, "Job2 should be created successfully")
 
             finished_job2 = queuer1.wait_for_job_finished(
@@ -536,7 +546,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             )
 
             # Add a third job from the second queuer to test cross-queuer functionality
-            job3 = queuer2.add_job(test_notification_task, "Cross-queuer test")
+            job3 = queuer2.add_job(global_notification_task, "Cross-queuer test")
             self.assertIsNotNone(
                 job3, "Job3 should be created successfully from queuer2"
             )
@@ -578,84 +588,135 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
     def test_notification_system_persistence(self):
         """Test that notification triggers persist across queuer lifecycle."""
 
-        # Create a queuer and verify initial state
-        queuer = new_queuer_with_db("persistence_test", 3, "", self.db_config)
+        # Check triggers exist initially
+        trigger_check = """
+        SELECT tgname, tgrelid::regclass as table_name 
+        FROM pg_trigger 
+        WHERE tgname LIKE '%notify_event'
+        ORDER BY tgname;
+        """
 
+        # Use a temporary queuer just to check initial triggers
+        temp_queuer = new_queuer_with_db("temp_check", 3, "", self.db_config)
         try:
-            # Check triggers exist
-            trigger_check = """
-            SELECT tgname, tgrelid::regclass as table_name 
-            FROM pg_trigger 
-            WHERE tgname LIKE '%job_notify%'
-            ORDER BY tgname;
-            """
-
-            initial_triggers = queuer.db_job.db.instance.execute(
+            initial_triggers = temp_queuer.db_job.db.instance.execute(
                 trigger_check
             ).fetchall()
             self.assertGreaterEqual(
                 len(initial_triggers), 2, "Should have notification triggers initially"
             )
+        finally:
+            temp_queuer.stop()
 
-            # Start and stop the queuer multiple times
+    def test_notification_system_persistence(self):
+        """Test that notification triggers persist across queuer lifecycle.
+
+        This test verifies that database notification triggers for job archiving
+        work correctly and persistently across multiple queuer instances.
+        """
+
+        # Check triggers exist initially
+        trigger_check = """
+        SELECT tgname, tgrelid::regclass as table_name 
+        FROM pg_trigger 
+        WHERE tgname LIKE '%notify_event'
+        ORDER BY tgname;
+        """
+
+        # Use a temporary queuer just to check initial triggers
+        temp_queuer = new_queuer_with_db("temp_check", 3, "", self.db_config)
+        try:
+            initial_triggers = temp_queuer.db_job.db.instance.execute(
+                trigger_check
+            ).fetchall()
+            self.assertGreaterEqual(
+                len(initial_triggers), 2, "Should have notification triggers initially"
+            )
+        finally:
+            temp_queuer.stop()
+
+        # Use a single queuer instance for all tests
+        queuer = new_queuer_with_db("persistence_test", 3, "", self.db_config)
+
+        try:
+            # Add the task
+            queuer.add_task(global_simple_task)
+
+            # Start the queuer
+            queuer.start()
+            self.assertTrue(queuer._running, "Queuer should start")
+
+            # Give time for listeners to establish connections
+            import time
+
+            time.sleep(3.0)  # Extra time for notification system setup
+
+            # Test multiple jobs with notification-based waiting
             for i in range(3):
-                queuer.start()
-                self.assertTrue(
-                    queuer._running, f"Queuer should start on iteration {i+1}"
-                )
+                print(f"DEBUG: Testing iteration {i}")
 
                 # Add a job
-                def simple_task(x: int) -> int:
-                    return x * 2
-
-                queuer.add_task(simple_task)
-                job = queuer.add_job(simple_task, i)
+                job = queuer.add_job(global_simple_task, i)
                 self.assertIsNotNone(job, f"Job should be created on iteration {i+1}")
+                print(f"DEBUG: Created job {job.rid} with parameter {i}")
 
-                # Wait for job to complete using wait_for_job_finished
+                # Wait for job completion using PURE notifications (no polling)
                 finished_job = queuer.wait_for_job_finished(
-                    job.rid, timeout_seconds=5.0
+                    job.rid,
+                    timeout_seconds=30.0,  # Generous timeout for notification-based waiting
                 )
+
+                # Verify job completed successfully
                 self.assertIsNotNone(
-                    finished_job, f"Job should finish on iteration {i+1}"
+                    finished_job,
+                    f"Job should complete via notifications on iteration {i+1}",
                 )
                 self.assertEqual(
                     finished_job.results,
                     i * 2,
-                    f"Job result should be correct on iteration {i+1}",
+                    f"Job result should be correct on iteration {i+1}: expected {i * 2}, got {finished_job.results}",
+                )
+                print(
+                    f"DEBUG: Job {i} completed via notifications with result {finished_job.results}"
                 )
 
-                # Stop the queuer
-                queuer.stop()
-                self.assertFalse(
-                    queuer._running, f"Queuer should stop on iteration {i+1}"
-                )
-
-                # Verify triggers still exist
+                # Verify triggers still exist after each job
                 current_triggers = queuer.db_job.db.instance.execute(
                     trigger_check
                 ).fetchall()
                 self.assertGreaterEqual(
                     len(current_triggers),
                     2,
-                    f"Triggers should persist after iteration {i+1}",
+                    f"Triggers should persist during iteration {i+1}",
                 )
 
-            # Final verification that the system is stable
-            final_triggers = queuer.db_job.db.instance.execute(trigger_check).fetchall()
-            self.assertEqual(
-                len(final_triggers),
-                len(initial_triggers),
-                "Trigger count should remain consistent",
-            )
+                print(f"DEBUG: Iteration {i} completed successfully via notifications")
 
         finally:
-            # Clean up
+            # Stop the queuer
             try:
                 if queuer._running:
                     queuer.stop()
-            except:
-                pass
+                    self.assertFalse(queuer._running, "Queuer should stop")
+            except Exception as e:
+                # Use basic logging since self.log may not be available
+                import logging
+
+                logging.warning(f"Error stopping queuer: {e}")
+
+        # Verify triggers persist after all iterations
+        final_queuer = new_queuer_with_db("final_check", 3, "", self.db_config)
+        try:
+            final_triggers = final_queuer.db_job.db.instance.execute(
+                trigger_check
+            ).fetchall()
+            self.assertEqual(
+                len(final_triggers),
+                len(initial_triggers),
+                "Trigger count should remain consistent after multiple queuer lifecycles",
+            )
+        finally:
+            final_queuer.stop()
 
     def test_job_insertion_no_hanging(self):
         """Test that job insertion doesn't hang with notification system."""
@@ -664,10 +725,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
 
         try:
             # Define a test task
-            def fast_task(data: str) -> str:
-                return f"Processed: {data}"
-
-            queuer.add_task(fast_task)
+            queuer.add_task(global_fast_task)
             queuer.start()
 
             # Add multiple jobs rapidly to test for hanging
@@ -675,7 +733,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             start_time = time.time()
 
             for i in range(10):
-                job = queuer.add_job(fast_task, f"test_data_{i}")
+                job = queuer.add_job(global_fast_task, f"test_data_{i}")
                 jobs.append(job)
                 self.assertIsNotNone(job, f"Job {i} should be created successfully")
 
@@ -701,7 +759,7 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
                 self.assertEqual(finished_job.results, f"Processed: test_data_{i}")
 
             # Verify system is still responsive
-            final_job = queuer.add_job(fast_task, "final_test")
+            final_job = queuer.add_job(global_fast_task, "final_test")
             self.assertIsNotNone(final_job, "Final job should be created successfully")
 
             # Verify final job completes

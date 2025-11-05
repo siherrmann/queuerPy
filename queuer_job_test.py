@@ -78,21 +78,28 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
         """Set up test fixtures."""
         super().setup_method()
 
-        # Create queuer with real database handlers
-        self.queuer = new_queuer("TestQueuer", 100)
-        self.queuer.db_worker = WorkerDBHandler(self.db, with_table_drop=True)
-        self.queuer.db_job = JobDBHandler(self.db, with_table_drop=True)
-
-        # Re-insert the worker since we changed the database handlers
-        self.queuer.worker = self.queuer.db_worker.insert_worker(self.queuer.worker)
+        # Create queuer with the test database configuration
+        self.queuer = new_queuer_with_db("TestQueuer", 100, "", self.db_config)
 
         # Add test tasks
         self.queuer.add_task(task_mock)
         mock_failer = MockFailer()
         self.queuer.add_task(mock_failer.task_mock_failing)
 
+        # Start the queuer to enable proper job processing
+        self.queuer.start()
+
     def tearDown(self):
         """Clean up after each test method."""
+        # Stop the queuer to clean up background tasks and connections
+        if hasattr(self, "queuer") and self.queuer:
+            try:
+                # Stop the queuer properly to avoid resource leaks
+                self.queuer.stop()
+            except Exception as e:
+                # Log but don't fail the test cleanup
+                print(f"Warning: Error stopping queuer in tearDown: {e}")
+
         super().teardown_method()
 
     def test_add_job_success_with_nil_options(self):
@@ -233,9 +240,8 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
         job1 = self.queuer.add_job(task_mock, 1, "2")
         job2 = self.queuer.add_job(task_mock, 3, "4")
 
-        # Assign jobs to worker through update_jobs_initial (simulating job pickup)
-        picked_jobs = self.queuer.db_job.update_jobs_initial(self.queuer.worker)
-        self.assertGreaterEqual(len(picked_jobs), 2)
+        # Note: Due to immediate processing, jobs are automatically picked up when created
+        # The jobs should now be assigned to the worker and in RUNNING status
 
         # Get jobs for this worker
         jobs = self.queuer.get_jobs_by_worker_rid(self.queuer.worker.rid)
@@ -251,18 +257,38 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
             self.assertEqual(job.worker_rid, self.queuer.worker.rid)
 
     def test_cancel_job_success(self):
-        """Test cancelling a job."""
-        # Create a real job in the database
-        job = self.queuer.add_job(task_mock, 1, "2")
+        """Test cancelling a job.
+
+        Note: Due to Python ProcessPoolExecutor limitations, this test verifies that:
+        1. The job status is correctly updated to CANCELLED
+        2. The job results are empty (not the completed result)
+        3. The job is moved to archive with CANCELLED status
+
+        The underlying process may continue running until completion, but the results
+        are discarded and the job is treated as cancelled by the system.
+        """
+        # Create a job with longer duration to ensure we can cancel it mid-execution
+        job = self.queuer.add_job(task_mock, 10, "2")
         self.assertIsNotNone(job)
 
-        # Cancel the job
         cancelled_job = self.queuer.cancel_job(job.rid)
-
-        # Verify job was cancelled
         self.assertIsNotNone(cancelled_job)
         self.assertEqual(cancelled_job.rid, job.rid)
         self.assertEqual(cancelled_job.status, JobStatus.CANCELLED)
+
+        time.sleep(0.5)  # Small delay to ensure DB update
+
+        # Check that the job is in archive with CANCELLED status
+        archived_job = self.queuer.db_job.select_job_from_archive(job.rid)
+        self.assertIsNotNone(archived_job, "Cancelled job should be moved to archive")
+        self.assertEqual(archived_job.status, JobStatus.CANCELLED)
+
+        self.assertTrue(isinstance(archived_job.results, list))
+        self.assertEqual(
+            len(archived_job.results),
+            0,
+            "Cancelled job should have empty results",
+        )
 
     def test_cancel_job_not_found_error(self):
         """Test cancelling a job that doesn't exist."""
@@ -278,14 +304,9 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
         """Test readding a job from archive."""
         # Create and cancel a job to get it in archive
         job = self.queuer.add_job(task_mock, 1, "2")
-        cancelled_job = self.queuer.cancel_job(job.rid)
 
-        # Readd the job from archive using the task function, not task name
-        # Get the task function from the tasks registry
-        task_function = self.queuer.tasks[cancelled_job.task_name].task
-        new_job = self.queuer.add_job_with_options(
-            cancelled_job.options, task_function, *cancelled_job.parameters
-        )
+        cancelled_job = self.queuer.cancel_job(job.rid)
+        new_job = self.queuer.readd_job_from_archive(cancelled_job.rid)
 
         # Verify new job was created
         self.assertIsNotNone(new_job)

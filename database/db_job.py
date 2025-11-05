@@ -117,7 +117,7 @@ class JobDBHandler:
                     job.started_at,
                     job.schedule_count,
                     job.attempts,
-                    json.dumps(job.results) if job.results else None,
+                    json.dumps(job.results) if job.results is not None else None,
                     job.error or None,
                     (
                         job.worker_rid

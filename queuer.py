@@ -260,7 +260,7 @@ class Queuer(
         # Start background tasks - mirrors Go's goroutine approach
         self._start_listeners()
         self._start_heartbeat_ticker()
-        self._start_poll_job_ticker()
+        self._start_poll_job_ticker()  # Backup polling every 5 minutes
 
         self.log.info("Queuer started")
 
@@ -359,41 +359,37 @@ class Queuer(
         self.log.info(f"Queuer '{self.worker.name}' stopped")
 
     def _start_listeners(self) -> None:
-        """Start database listeners."""
+        """Start database listeners - mirrors Go implementation."""
 
         async def handle_job_notification(notification):
             """Handle job database notifications."""
             try:
-                self.log.info(f"=== JOB NOTIFICATION RECEIVED ===")
-                self.log.info(f"Raw notification: {notification}")
-                self.log.debug(f"Job notification received: {notification}")
-                # Parse notification to determine if it's an insert or delete
+                self.log.info(f"Job notification received: {notification}")
                 job_data = json.loads(notification)
-                self.log.debug(f"Parsed job data: {job_data}")
+                self.log.info(f"Parsed job data: {job_data}")
 
-                # Check if this is a job being deleted (moved to archive)
-                # We can detect this by checking if the job has completion data
-                if "results" in job_data and job_data.get("results") is not None:
-                    # This is a completed job being archived, broadcast delete event
-                    job = Job.from_dict(job_data)
-                    self.log.info(
-                        f"Job completed via job table notification: {job.rid}"
-                    )
-                    if (
-                        hasattr(self, "job_delete_broadcaster")
-                        and self.job_delete_broadcaster
-                    ):
-                        # Now we can directly await the broadcast since we're in an async context
-                        try:
-                            await self.job_delete_broadcaster.broadcast(job)
-                        except Exception as e:
-                            self.log.error(f"Error broadcasting job delete: {e}")
+                # Check job status to determine action
+                status = job_data.get("status")
+                self.log.info(f"Job status: {status}")
+
+                if status in ["QUEUED", "SCHEDULED"]:
+                    # New job - run job processing immediately (only if queuer is running)
+                    if self._running:
+                        self.log.info("New job detected - processing immediately")
+                        asyncio.create_task(self._async_run_job_initial())
+                    else:
+                        self.log.debug(
+                            "New job detected but queuer not running - skipping immediate processing"
+                        )
                 else:
-                    # This is a new job being inserted, run job processing immediately
-                    self.log.info(
-                        "=== NEW JOB DETECTED VIA LISTENER - PROCESSING IMMEDIATELY ==="
-                    )
-                    self._run_job_initial()
+                    # Job update - notify update listener
+                    self.log.info(f"Job update detected with status: {status}")
+                    if (
+                        hasattr(self, "job_update_broadcaster")
+                        and self.job_update_broadcaster
+                    ):
+                        job = Job.from_dict(job_data)
+                        await self.job_update_broadcaster.broadcast(job)
 
             except Exception as e:
                 self.log.error(f"Error handling job notification: {e}")
@@ -401,91 +397,78 @@ class Queuer(
 
                 traceback.print_exc()
 
-        # Start job listener for both inserts and deletes
+        async def handle_job_archive_notification(notification):
+            """Handle job archive database notifications."""
+            try:
+                self.log.info(f"Job archive notification received: {notification}")
+                job_data = json.loads(notification)
+                self.log.info(f"Parsed archive job data: {job_data}")
+
+                status = job_data.get("status")
+                if status == "CANCELLED":
+                    # Cancel running job if it exists
+                    from uuid import UUID
+
+                    job_rid = UUID(job_data.get("rid"))
+                    if job_rid in self.active_runners:
+                        self.log.info(f"Canceling running job: {job_rid}")
+                        runner = self.active_runners[job_rid]
+                        runner.cancel()
+                        del self.active_runners[job_rid]
+                else:
+                    # Job completed - notify delete listeners (job moved from main table to archive)
+                    self.log.info(f"Job completed with status: {status}")
+                    if (
+                        hasattr(self, "job_delete_broadcaster")
+                        and self.job_delete_broadcaster
+                    ):
+                        job = Job.from_dict(job_data)
+                        await self.job_delete_broadcaster.broadcast(job)
+                        self.log.info(
+                            f"Broadcasted job deletion completion for {job.rid}"
+                        )
+
+            except Exception as e:
+                self.log.error(f"Error handling job archive notification: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+        # Start job listener
         if self.job_db_listener:
-            # Start the async listener using the event loop and wait for connection
             try:
 
-                async def start_listener():
+                async def start_job_listener():
                     await self.job_db_listener.listen(handle_job_notification)
 
-                # Start the listener but don't wait for completion (it's long-running)
-                future = Runner().run_in_event_loop(start_listener())
+                Runner().run_in_event_loop(start_job_listener())
 
-                # Wait a moment for the listener to establish connection
+                # Wait for listener to establish connection
                 import time
 
-                time.sleep(0.5)  # Give time for async connection to establish
+                time.sleep(1.0)  # Give more time for connection to establish
 
-                self.log.info("Started async job database listener")
+                self.log.info("Started job database listener")
             except Exception as e:
                 self.log.error(f"Error starting job listener: {e}")
 
-        # Start job archive listener for completed jobs
+        # Start job archive listener
         if self.job_archive_db_listener:
-            # Start the async listener using the event loop and wait for connection
             try:
 
                 async def start_archive_listener():
                     await self.job_archive_db_listener.listen(
-                        self._handle_job_archive_notification
+                        handle_job_archive_notification
                     )
 
-                # Start the listener but don't wait for completion (it's long-running)
-                future = Runner().run_in_event_loop(start_archive_listener())
+                Runner().run_in_event_loop(start_archive_listener())
 
-                # Wait a moment for the listener to establish connection
-                time.sleep(0.5)  # Give time for async connection to establish
+                # Wait for listener to establish connection
+                time.sleep(1.0)  # Give more time for connection to establish
 
-                self.log.info("Started async job archive database listener")
+                self.log.info("Started job archive database listener")
             except Exception as e:
                 self.log.error(f"Error starting job archive listener: {e}")
-        else:
-            self.log.warning("No job archive database listener available")
-
-    def _handle_job_archive_notification(self, notification):
-        """Handle job archive database notifications when jobs are completed."""
-        try:
-            self.log.info(f"Received job archive notification: {notification}")
-
-            # Parse notification for completed job
-            try:
-                job_data = json.loads(notification)
-                self.log.info(f"Parsed notification data: {job_data}")
-            except Exception as e:
-                self.log.error(f"Failed to parse notification JSON: {e}")
-                return
-
-            try:
-                job = Job.from_dict(job_data)
-                self.log.info(f"Created job object: {job.rid} with status {job.status}")
-            except Exception as e:
-                self.log.error(f"Failed to create Job from dict: {e}")
-                return
-
-            self.log.info(
-                f"Job completed and archived: {job.rid} with status {job.status}"
-            )
-
-            # Broadcast the completed job as a "delete" event (job moved from active to archive)
-            # This matches the wait_for_job_finished expectation
-            if hasattr(self, "job_delete_broadcaster") and self.job_delete_broadcaster:
-                try:
-                    future = Runner().run_in_event_loop(
-                        self.job_delete_broadcaster.broadcast(job)
-                    )
-                    self.log.info(f"Broadcasted job completion for {job.rid}")
-                    # Don't wait for the broadcast to complete, just fire and forget
-                except Exception as e:
-                    self.log.error(f"Error broadcasting job completion: {e}")
-            else:
-                self.log.warning("No job delete broadcaster available")
-
-        except Exception as e:
-            self.log.error(f"Error handling job archive notification: {e}")
-            import traceback
-
-            traceback.print_exc()
 
     def _start_heartbeat_ticker(self) -> None:
         """Start heartbeat ticker."""
@@ -504,17 +487,37 @@ class Queuer(
         ticker.go()
 
     def _start_poll_job_ticker(self) -> None:
-        """Start job polling ticker."""
+        """
+        Start job polling ticker as backup mechanism.
+        This provides a safety net in case notification-based processing fails.
+        """
 
-        def poll_func():
-            """Poll for jobs to execute."""
-            self.log.info("Polling jobs...")
+        def poll_jobs_func():
+            """Poll for jobs as backup to notification system."""
             try:
+                self.log.debug("Running backup job polling")
                 self._run_job_initial()
             except Exception as e:
-                self.log.error(f"Error running job: {e}")
+                self.log.warning(f"Backup job polling error: {e}")
 
-        # Create and start ticker - mirrors Go implementation
-        ticker: Ticker = new_ticker(self.job_poll_interval, poll_func)
-        self.log.info("Starting job poll ticker...")
+        ticker: Ticker = new_ticker(self.job_poll_interval, poll_jobs_func)
+        self.log.info(
+            f"Starting backup job polling ticker (interval: {self.job_poll_interval})..."
+        )
         ticker.go()
+
+    async def _async_run_job_initial(self) -> None:
+        """
+        Async wrapper for _run_job_initial to avoid database transaction conflicts.
+        This ensures job processing runs in a separate context from the notification handler.
+        """
+        try:
+            # Use a small delay to ensure the notification transaction has completed
+            await asyncio.sleep(0.1)
+
+            # Run job processing in the main thread context
+            # Since _run_job_initial is synchronous, we need to run it properly
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._run_job_initial)
+        except Exception as e:
+            self.log.error(f"Error in async job processing: {e}")
