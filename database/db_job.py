@@ -44,9 +44,8 @@ class JobDBHandler:
         )  # Load notify function first
         sql_loader.load_job_sql(connection, with_table_drop)
 
-        # Create tables if they don't exist
-        if not self.check_tables_existence():
-            self.create_table()
+        # Always call create_table - it's safe as it uses IF NOT EXISTS and OR REPLACE
+        self.create_table()
 
     def check_tables_existence(self) -> bool:
         """Check if job tables exist."""
@@ -117,7 +116,7 @@ class JobDBHandler:
                     job.started_at,
                     job.schedule_count,
                     job.attempts,
-                    json.dumps(job.results) if job.results is not None else None,
+                    json.dumps(job.results),
                     job.error or None,
                     (
                         job.worker_rid
@@ -163,6 +162,9 @@ class JobDBHandler:
         Mirrors Go's UpdateJobFinal method.
         """
         with self.db.instance.cursor(row_factory=dict_row) as cur:
+            # Convert results to JSON string for JSONB parameter
+            results_param = json.dumps(job.results)
+
             if self.encryption_key:
                 cur.execute(
                     """
@@ -171,7 +173,7 @@ class JobDBHandler:
                     (
                         job.id,
                         job.status,
-                        json.dumps(job.results),
+                        results_param,
                         job.error,
                         self.encryption_key,
                     ),
@@ -181,7 +183,7 @@ class JobDBHandler:
                     """
                     SELECT * FROM update_job_final(%s, %s, %s, %s);
                 """,
-                    (job.id, job.status, json.dumps(job.results), job.error),
+                    (job.id, job.status, results_param, job.error),
                 )
 
             row = cur.fetchone()

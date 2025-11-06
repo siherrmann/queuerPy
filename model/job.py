@@ -146,11 +146,8 @@ class Job:
             )
 
         if row.get("results") is not None:
-            job.results = (
-                json.loads(row["results"])
-                if isinstance(row["results"], str)
-                else row["results"]
-            )
+            # JSONB columns return Python objects directly, no JSON parsing needed
+            job.results = row["results"]
 
         if row.get("options"):
             options_data = (

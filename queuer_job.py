@@ -580,7 +580,7 @@ class QueuerJobMixin:
 
         # Create retryer and attempt retry
         retryer = Retryer(retry_function, job.options.on_error)
-        error = retryer.retry()
+        error = await retryer.retry()
 
         if error:
             await self._fail_job(
