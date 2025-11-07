@@ -60,8 +60,8 @@ def new_queuer(name: str, max_concurrency: int, *options: OnError) -> "Queuer":
 def new_queuer_with_db(
     name: str,
     max_concurrency: int,
-    encryption_key: str,
-    db_config: Optional[DatabaseConfiguration],
+    encryption_key: Optional[str] = None,
+    db_config: Optional[DatabaseConfiguration] = None,
     *options: OnError,
 ) -> "Queuer":
     """

@@ -13,7 +13,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Import the queuer and related components
-from queuer import new_queuer_with_db
+from queuer import Queuer, new_queuer_with_db
 from helper.test_database import DatabaseTestMixin
 
 
@@ -33,7 +33,7 @@ def short_task(param1: int, param2: str) -> int:
         ValueError: If param2 cannot be converted to int
     """
     # Simulate some work
-    time.sleep(1)
+    time.sleep(param1)
 
     # Example for some error handling
     try:
@@ -61,36 +61,34 @@ class QueuerExample(DatabaseTestMixin):
         """Run the main example demonstration matching Go structure."""
         try:
             # Create a new queuer instance
-            q = new_queuer_with_db(
+            q: Queuer = new_queuer_with_db(
                 name="exampleEasyWorker",
                 max_concurrency=3,
-                encryption_key="",
+                encryption_key=None,
                 db_config=self.db.config,
-                options=None,
             )
-
-            # Add a short task to the queuer
             q.add_task(short_task)
-
-            # Start the queuer
             q.start()
 
-            # Add a job to the queue
-            job = q.add_job(short_task, 5, "12")
+            job = q.add_job(short_task, 1, "12")
             if not job:
                 logging.error("Error adding job")
                 return None
 
-            # Wait for job to finish (equivalent to Go's WaitForJobFinished)
-            job = await q.wait_for_job_finished(job.rid)
+            logging.info(f"Job created: {job.rid}")
 
-            logging.info(f"Job finished with status: {job.status}")
+            # Use the proper wait method with a longer timeout
+            job = q.wait_for_job_finished(job.rid, timeout_seconds=30.0)
 
-            # Stop the queuer gracefully
-            q.stop()
+            if job:
+                logging.info(
+                    f"Job completed with status: {job.status} and results: {job.results}"
+                )
+            else:
+                logging.error("Job timed out or failed to complete")
 
-            # Example completed successfully
             logging.info("Exiting...")
+            q.stop()
             return job
 
         except Exception as e:

@@ -43,14 +43,8 @@ class Runner:
 
     def _setup_event_loop(self) -> None:
         """Set up the shared event loop."""
-        try:
-            # Try existing loop first
-            self._event_loop = asyncio.get_running_loop()
-            return
-        except RuntimeError:
-            pass
-
-        # Create new loop in background thread
+        # Always create a new loop in background thread to avoid conflicts
+        # with the main event loop from asyncio.run()
         loop = asyncio.new_event_loop()
 
         def run_loop():
@@ -59,7 +53,7 @@ class Runner:
 
         thread = threading.Thread(target=run_loop, daemon=True, name="RunnerEventLoop")
         thread.start()
-        time.sleep(0.1)  # Let loop start
+        time.sleep(0.2)  # Give loop more time to start
         self._event_loop = loop
 
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
