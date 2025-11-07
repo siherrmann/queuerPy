@@ -16,7 +16,7 @@ from uuid import UUID
 # Local imports - database components
 from database.db_job import JobDBHandler
 from database.db_worker import WorkerDBHandler
-from database.db_listener import QueuerListener
+from database.db_listener import QueuerListener, new_queuer_db_listener
 
 # Local imports - core components
 from core.broadcaster import Broadcaster, new_broadcaster
@@ -216,9 +216,11 @@ class Queuer(
 
         # Set up database listeners - mirrors Go's NewQueuerDBListener calls
         try:
-            self.job_db_listener = QueuerListener(self.db_config, "job")
+            self.job_db_listener = new_queuer_db_listener(self.db_config, "job")
             self.log.info("Added listener for channel: job")
-            self.job_archive_db_listener = QueuerListener(self.db_config, "job_archive")
+            self.job_archive_db_listener = new_queuer_db_listener(
+                self.db_config, "job_archive"
+            )
             self.log.info("Added listener for channel: job_archive")
         except Exception as e:
             self.log.error(f"Error creating database listeners: {e}")

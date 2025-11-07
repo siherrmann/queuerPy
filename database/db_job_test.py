@@ -242,6 +242,204 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         # In a real system, you'd update the job status as it progresses
         # For now, we just verify the basic insert/select functionality
 
+    def test_update_job_final(self):
+        """Test updating job with final status and archiving."""
+        # Create and insert a job
+        job = Job(
+            task_name="test_final_task",
+            parameters=["param1"],
+            status=JobStatus.RUNNING,
+        )
+
+        inserted_job = self.job_handler.insert_job(job)
+
+        # Update job with final status
+        inserted_job.status = "SUCCEEDED"
+        inserted_job.results = {"result": "success"}
+        inserted_job.error = ""
+
+        updated_job = self.job_handler.update_job_final(inserted_job)
+
+        self.assertIsNotNone(updated_job)
+        self.assertEqual(updated_job.status, "SUCCEEDED")
+        self.assertEqual(updated_job.results, {"result": "success"})
+
+        # Verify job is no longer in main table
+        main_job = self.job_handler.select_job(updated_job.rid)
+        self.assertIsNone(main_job)
+
+        # Verify job is in archive
+        archived_job = self.job_handler.select_job_from_archive(updated_job.rid)
+        self.assertIsNotNone(archived_job)
+        self.assertEqual(archived_job.status, "SUCCEEDED")
+
+    def test_update_job_final_with_error(self):
+        """Test updating job with failed status and error message."""
+        # Create and insert a job
+        job = Job(
+            task_name="test_failed_task",
+            parameters=["param1"],
+            status=JobStatus.RUNNING,
+        )
+
+        inserted_job = self.job_handler.insert_job(job)
+
+        # Update job with failed status
+        inserted_job.status = "FAILED"
+        inserted_job.results = {}
+        inserted_job.error = "Task execution failed"
+
+        updated_job = self.job_handler.update_job_final(inserted_job)
+
+        self.assertIsNotNone(updated_job)
+        self.assertEqual(updated_job.status, "FAILED")
+        self.assertEqual(updated_job.error, "Task execution failed")
+
+        # Verify job is in archive with error
+        archived_job = self.job_handler.select_job_from_archive(updated_job.rid)
+        self.assertIsNotNone(archived_job)
+        self.assertEqual(archived_job.status, "FAILED")
+        self.assertEqual(archived_job.error, "Task execution failed")
+
+    def test_select_job_from_archive(self):
+        """Test selecting a job from archive."""
+        # Create, insert, and archive a job
+        job = Job(
+            task_name="archive_test_task",
+            parameters=["test"],
+            status=JobStatus.RUNNING,
+        )
+
+        inserted_job = self.job_handler.insert_job(job)
+        inserted_job.status = "SUCCEEDED"
+        inserted_job.results = {"archived": True}
+
+        # Archive the job
+        archived_job = self.job_handler.update_job_final(inserted_job)
+
+        # Test selecting from archive
+        retrieved_job = self.job_handler.select_job_from_archive(archived_job.rid)
+
+        self.assertIsNotNone(retrieved_job)
+        self.assertEqual(retrieved_job.rid, archived_job.rid)
+        self.assertEqual(retrieved_job.task_name, "archive_test_task")
+        self.assertEqual(retrieved_job.status, "SUCCEEDED")
+        self.assertEqual(retrieved_job.results, {"archived": True})
+
+    def test_select_all_jobs_from_archive(self):
+        """Test selecting all jobs from archive with pagination."""
+        archived_jobs = []
+
+        # Create and archive multiple jobs
+        for i in range(5):
+            job = Job(
+                task_name=f"archive_job_{i}",
+                parameters=[f"param_{i}"],
+                status=JobStatus.RUNNING,
+            )
+
+            inserted_job = self.job_handler.insert_job(job)
+            inserted_job.status = "SUCCEEDED"
+
+            archived_job = self.job_handler.update_job_final(inserted_job)
+            archived_jobs.append(archived_job)
+
+        # Test retrieving all archived jobs
+        retrieved_jobs = self.job_handler.select_all_jobs_from_archive(entries=10)
+
+        # Should have at least our 5 test jobs
+        self.assertGreaterEqual(len(retrieved_jobs), 5)
+
+        # Test pagination
+        paginated_jobs = self.job_handler.select_all_jobs_from_archive(entries=3)
+        self.assertEqual(len(paginated_jobs), 3)
+
+    def test_select_all_jobs_by_search(self):
+        """Test searching jobs by various criteria."""
+        # Create jobs with different task names
+        search_jobs = []
+        for i in range(3):
+            job = Job(
+                task_name=f"SearchableTask_{i}",
+                parameters=[f"param_{i}"],
+                status=JobStatus.QUEUED,
+            )
+            inserted_job = self.job_handler.insert_job(job)
+            search_jobs.append(inserted_job)
+
+        # Create jobs with different names
+        for i in range(2):
+            job = Job(
+                task_name=f"OtherTask_{i}",
+                parameters=[f"param_{i}"],
+                status=JobStatus.QUEUED,
+            )
+            self.job_handler.insert_job(job)
+
+        # Test search functionality
+        found_jobs = self.job_handler.select_all_jobs_by_search(
+            "SearchableTask", entries=10
+        )
+
+        # Should find our 3 searchable jobs
+        searchable_jobs = [
+            job for job in found_jobs if "SearchableTask" in job.task_name
+        ]
+        self.assertEqual(len(searchable_jobs), 3)
+
+    def test_select_all_jobs_from_archive_by_search(self):
+        """Test searching archived jobs by various criteria."""
+        # Create and archive jobs with different names
+        for i in range(3):
+            job = Job(
+                task_name=f"ArchiveSearchTask_{i}",
+                parameters=[f"param_{i}"],
+                status=JobStatus.RUNNING,
+            )
+
+            inserted_job = self.job_handler.insert_job(job)
+            inserted_job.status = "SUCCEEDED"
+            self.job_handler.update_job_final(inserted_job)
+
+        # Create other archived jobs
+        for i in range(2):
+            job = Job(
+                task_name=f"OtherArchiveTask_{i}",
+                parameters=[f"param_{i}"],
+                status=JobStatus.RUNNING,
+            )
+
+            inserted_job = self.job_handler.insert_job(job)
+            inserted_job.status = "SUCCEEDED"
+            self.job_handler.update_job_final(inserted_job)
+
+        # Test archive search functionality
+        found_jobs = self.job_handler.select_all_jobs_from_archive_by_search(
+            "ArchiveSearchTask", entries=10
+        )
+
+        # Should find our 3 searchable archived jobs
+        searchable_jobs = [
+            job for job in found_jobs if "ArchiveSearchTask" in job.task_name
+        ]
+        self.assertEqual(len(searchable_jobs), 3)
+
+    def test_update_stale_jobs(self):
+        """Test updating stale jobs functionality."""
+        # This test requires worker table setup, so we'll do a basic test
+        updated_count = self.job_handler.update_stale_jobs()
+
+        # Should return a number (could be 0 if no stale jobs)
+        self.assertIsInstance(updated_count, int)
+        self.assertGreaterEqual(updated_count, 0)
+
+    def test_nil_database_error(self):
+        """Test error handling with None database connection."""
+        with self.assertRaises(ValueError) as context:
+            JobDBHandler(None)
+
+        self.assertIn("database connection is None", str(context.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

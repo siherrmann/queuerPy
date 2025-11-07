@@ -83,8 +83,8 @@ class JobDBHandler:
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
-                INSERT INTO job (options, task_name, parameters, status, scheduled_at, started_at, schedule_count, attempts, results, error, worker_rid)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO job (options, task_name, parameters, status, scheduled_at, schedule_count, worker_rid, started_at, results, error)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING
                     id,
                     rid,
@@ -95,9 +95,9 @@ class JobDBHandler:
                     parameters,
                     status,
                     scheduled_at,
-                    started_at,
                     schedule_count,
                     attempts,
+                    started_at,
                     results,
                     error,
                     created_at,
@@ -113,17 +113,11 @@ class JobDBHandler:
                         else job.status
                     ),
                     job.scheduled_at,
-                    job.started_at,
                     job.schedule_count,
-                    job.attempts,
-                    json.dumps(job.results),
-                    job.error or None,
-                    (
-                        job.worker_rid
-                        if job.worker_rid
-                        != UUID("00000000-0000-0000-0000-000000000000")
-                        else None
-                    ),
+                    job.worker_rid,
+                    job.started_at,
+                    json.dumps(job.results) if job.results else None,
+                    job.error,
                 ),
             )
 
@@ -135,6 +129,29 @@ class JobDBHandler:
                 return job_result
             else:
                 raise RuntimeError("Failed to insert job")
+
+    def insert_job_tx(self, job: Job) -> Job:
+        """
+        Insert a job within a transaction context.
+        Placeholder method - mirrors Go's InsertJobTx method.
+        TODO: Implement transaction-aware insert logic.
+        """
+        # For now, delegate to regular insert_job
+        # In full implementation, this would handle explicit transaction context
+        return self.insert_job(job)
+
+    def batch_insert_jobs(self, jobs: List[Job]) -> List[Job]:
+        """
+        Insert multiple jobs in a batch operation.
+        Placeholder method - mirrors Go's BatchInsertJobs method.
+        TODO: Implement efficient batch insert logic.
+        """
+        # For now, insert jobs one by one
+        # In full implementation, this would use batch SQL operations
+        result_jobs = []
+        for job in jobs:
+            result_jobs.append(self.insert_job(job))
+        return result_jobs
 
     def update_jobs_initial(self, worker: Worker) -> List[Job]:
         """
@@ -168,7 +185,24 @@ class JobDBHandler:
             if self.encryption_key:
                 cur.execute(
                     """
-                    SELECT * FROM update_job_final_encrypted(%s, %s, %s, %s, %s);
+                    SELECT
+                        output_id as id,
+                        output_rid as rid,
+                        output_worker_id as worker_id,
+                        output_worker_rid as worker_rid,
+                        output_options as options,
+                        output_task_name as task_name,
+                        output_parameters as parameters,
+                        output_status as status,
+                        output_scheduled_at as scheduled_at,
+                        output_started_at as started_at,
+                        output_schedule_count as schedule_count,
+                        output_attempts as attempts,
+                        output_results as results,
+                        output_error as error,
+                        output_created_at as created_at,
+                        output_updated_at as updated_at
+                    FROM update_job_final_encrypted(%s, %s, %s, %s, %s);
                 """,
                     (
                         job.id,
@@ -181,38 +215,101 @@ class JobDBHandler:
             else:
                 cur.execute(
                     """
-                    SELECT * FROM update_job_final(%s, %s, %s, %s);
+                    SELECT
+                        output_id as id,
+                        output_rid as rid,
+                        output_worker_id as worker_id,
+                        output_worker_rid as worker_rid,
+                        output_options as options,
+                        output_task_name as task_name,
+                        output_parameters as parameters,
+                        output_status as status,
+                        output_scheduled_at as scheduled_at,
+                        output_started_at as started_at,
+                        output_schedule_count as schedule_count,
+                        output_attempts as attempts,
+                        output_results as results,
+                        output_error as error,
+                        output_created_at as created_at,
+                        output_updated_at as updated_at
+                    FROM update_job_final(%s, %s, %s, %s);
                 """,
                     (job.id, job.status, results_param, job.error),
                 )
 
             row = cur.fetchone()
             if row:
-                return Job.from_row(row)
+                job_result = Job.from_row(row)
+                # Commit the transaction to ensure the job is properly archived
+                self.db.instance.commit()
+                return job_result
             else:
                 raise RuntimeError("Failed to update job")
 
+    def update_stale_jobs(self) -> int:
+        """
+        Update stale jobs to CANCELLED status where the assigned worker is STOPPED.
+        Mirrors Go's UpdateStaleJobs method.
+        """
+        with self.db.instance.cursor() as cur:
+            try:
+                cur.execute(
+                    """
+                    UPDATE job 
+                    SET status = %s 
+                    WHERE status NOT IN (%s, %s, %s)
+                      AND worker_rid IN (
+                          SELECT rid 
+                          FROM worker 
+                          WHERE status = %s
+                      );
+                """,
+                    ("CANCELLED", "SUCCEEDED", "CANCELLED", "FAILED", "STOPPED"),
+                )
+                return cur.rowcount
+            except Exception as e:
+                # If worker table doesn't exist, return 0 (no jobs updated)
+                if 'relation "worker" does not exist' in str(e):
+                    return 0
+                raise
+
+    def delete_job(self, rid: UUID) -> None:
+        """Delete a job by RID."""
+        with self.db.instance.cursor() as cur:
+            cur.execute("DELETE FROM job WHERE rid = %s;", (rid,))
+        self.db.instance.commit()
+
     def select_job(self, rid: UUID) -> Optional[Job]:
-        """Select a job by RID."""
+        """Select a job by RID. Mirrors Go's SelectJob method."""
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
-                SELECT * FROM job WHERE rid = %s;
+                SELECT
+                    id,
+                    rid,
+                    worker_id,
+                    worker_rid,
+                    options,
+                    task_name,
+                    parameters,
+                    status,
+                    scheduled_at,
+                    started_at,
+                    schedule_count,
+                    attempts,
+                    CASE
+                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
+                        ELSE results
+                    END AS results,
+                    error,
+                    created_at,
+                    updated_at
+                FROM
+                    job
+                WHERE
+                    rid = %s;
             """,
-                (rid,),
-            )
-
-            row = cur.fetchone()
-            return Job.from_row(row) if row else None
-
-    def select_job_from_archive(self, rid: UUID) -> Optional[Job]:
-        """Select a job from archive by RID."""
-        with self.db.instance.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                SELECT * FROM job_archive WHERE rid = %s;
-            """,
-                (rid,),
+                (self.encryption_key or "", rid),
             )
 
             row = cur.fetchone()
@@ -258,23 +355,236 @@ class JobDBHandler:
 
             return jobs
 
-    def delete_job(self, rid: UUID) -> None:
-        """Delete a job by RID."""
-        with self.db.instance.cursor() as cur:
-            cur.execute("DELETE FROM job WHERE rid = %s;", (rid,))
-        self.db.instance.commit()
-
-    def update_stale_jobs(self) -> int:
-        """Update stale jobs (jobs that have been running too long)."""
-        with self.db.instance.cursor() as cur:
+    def select_all_jobs_by_search(
+        self, search: str, last_id: int = 0, entries: int = 100
+    ) -> List[Job]:
+        """
+        Select all jobs filtered by search string. Mirrors Go's SelectAllJobsBySearch method.
+        Searches across 'rid', 'worker_id', 'task_name', and 'status' fields.
+        """
+        with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
-                UPDATE job 
-                SET status = 'FAILED', 
-                    error = 'Job timed out',
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE status = 'RUNNING' 
-                AND started_at < CURRENT_TIMESTAMP - INTERVAL '1 hour';
-            """
+                SELECT
+                    id,
+                    rid,
+                    worker_id,
+                    worker_rid,
+                    options,
+                    task_name,
+                    parameters,
+                    status,
+                    scheduled_at,
+                    started_at,
+                    schedule_count,
+                    attempts,
+                    CASE
+                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
+                        ELSE results
+                    END AS results,
+                    error,
+                    created_at,
+                    updated_at
+                FROM job
+                WHERE (rid::text ILIKE '%%' || %s || '%%'
+                        OR worker_id::text ILIKE '%%' || %s || '%%'
+                        OR task_name ILIKE '%%' || %s || '%%'
+                        OR status ILIKE '%%' || %s || '%%')
+                    AND (0 = %s
+                        OR created_at < (
+                            SELECT
+                                u.created_at
+                            FROM
+                                job AS u
+                            WHERE
+                                u.id = %s))
+                ORDER BY
+                    created_at DESC
+                LIMIT %s;
+            """,
+                (
+                    self.encryption_key or "",
+                    search,
+                    search,
+                    search,
+                    search,
+                    last_id,
+                    last_id,
+                    entries,
+                ),
             )
-            return cur.rowcount
+
+            jobs = []
+            for row in cur.fetchall():
+                jobs.append(Job.from_row(row))
+
+            return jobs
+
+    def add_retention_archive(self, days: int) -> None:
+        """
+        Add retention policy for archive cleanup.
+        Placeholder method - mirrors Go's AddRetentionArchive method.
+        TODO: Implement archive retention policy.
+        """
+        # Placeholder implementation
+        pass
+
+    def remove_retention_archive(self) -> None:
+        """
+        Remove retention policy for archive cleanup.
+        Placeholder method - mirrors Go's RemoveRetentionArchive method.
+        TODO: Implement archive retention removal.
+        """
+        # Placeholder implementation
+        pass
+
+    def select_job_from_archive(self, rid: UUID) -> Optional[Job]:
+        """Select a job from archive by RID. Mirrors Go's SelectJobFromArchive method."""
+        with self.db.instance.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    rid,
+                    worker_id,
+                    worker_rid,
+                    options,
+                    task_name,
+                    parameters,
+                    status,
+                    scheduled_at,
+                    started_at,
+                    schedule_count,
+                    attempts,
+                    CASE
+                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
+                        ELSE results
+                    END AS results,
+                    error,
+                    created_at,
+                    updated_at
+                FROM
+                    job_archive
+                WHERE
+                    rid = %s;
+            """,
+                (self.encryption_key or "", rid),
+            )
+
+            row = cur.fetchone()
+            return Job.from_row(row) if row else None
+
+    def select_all_jobs_from_archive(
+        self, last_id: int = 0, entries: int = 100
+    ) -> List[Job]:
+        """Select all jobs from archive with pagination. Mirrors Go's SelectAllJobsFromArchive method."""
+        with self.db.instance.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    rid,
+                    worker_id,
+                    worker_rid,
+                    options,
+                    task_name,
+                    parameters,
+                    status,
+                    scheduled_at,
+                    started_at,
+                    schedule_count,
+                    attempts,
+                    CASE
+                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
+                        ELSE results
+                    END AS results,
+                    error,
+                    created_at,
+                    updated_at
+                FROM
+                    job_archive
+                WHERE (0 = %s
+                    OR created_at < (
+                        SELECT
+                            d.created_at
+                        FROM
+                            job_archive AS d
+                        WHERE
+                            d.id = %s))
+                ORDER BY
+                    created_at DESC
+                LIMIT %s;
+            """,
+                (self.encryption_key or "", last_id, last_id, entries),
+            )
+
+            jobs = []
+            for row in cur.fetchall():
+                jobs.append(Job.from_row(row))
+
+            return jobs
+
+    def select_all_jobs_from_archive_by_search(
+        self, search: str, last_id: int = 0, entries: int = 100
+    ) -> List[Job]:
+        """
+        Select all archived jobs filtered by search string. Mirrors Go's SelectAllJobsFromArchiveBySearch method.
+        Searches across 'rid', 'worker_id', 'task_name', and 'status' fields.
+        """
+        with self.db.instance.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    rid,
+                    worker_id,
+                    worker_rid,
+                    options,
+                    task_name,
+                    parameters,
+                    status,
+                    scheduled_at,
+                    started_at,
+                    schedule_count,
+                    attempts,
+                    CASE
+                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
+                        ELSE results
+                    END AS results,
+                    error,
+                    created_at,
+                    updated_at
+                FROM job_archive
+                WHERE (rid::text ILIKE '%%' || %s || '%%'
+                        OR worker_id::text ILIKE '%%' || %s || '%%'
+                        OR task_name ILIKE '%%' || %s || '%%'
+                        OR status ILIKE '%%' || %s || '%%')
+                    AND (0 = %s
+                        OR created_at < (
+                            SELECT
+                                d.created_at
+                            FROM
+                                job_archive AS d
+                            WHERE
+                                d.id = %s))
+                ORDER BY
+                    created_at DESC
+                LIMIT %s;
+            """,
+                (
+                    self.encryption_key or "",
+                    search,
+                    search,
+                    search,
+                    search,
+                    last_id,
+                    last_id,
+                    entries,
+                ),
+            )
+
+            jobs = []
+            for row in cur.fetchall():
+                jobs.append(Job.from_row(row))
+
+            return jobs

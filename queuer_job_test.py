@@ -325,6 +325,113 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
 
         self.assertIn("Job not found in archive", str(context.exception))
 
+    def test_failed_job_archived_with_error(self):
+        """Test that failed jobs are properly archived with their error messages."""
+        # Create a job that will fail
+        job = Job(
+            task_name="failing_task",
+            parameters=["test_param"],
+            status=JobStatus.RUNNING,
+            error="",
+        )
+
+        # Insert the job
+        inserted_job = self.queuer.db_job.insert_job(job)
+
+        # Simulate job failure by updating it with error information
+        inserted_job.status = "FAILED"  # String format for database update
+        inserted_job.error = "Task failed due to invalid input data"
+        inserted_job.results = {"error_details": "Validation failed"}
+
+        # Use the database update function to move job to archive
+        archived_job = self.queuer.db_job.update_job_final(inserted_job)
+
+        # Verify the job was updated in the database
+        self.assertIsNotNone(archived_job)
+        self.assertEqual(archived_job.status, "FAILED")
+        self.assertEqual(archived_job.error, "Task failed due to invalid input data")
+
+        # Verify the job is now in the archive
+        archived_job_from_db = self.queuer.db_job.select_job_from_archive(
+            archived_job.rid
+        )
+        self.assertIsNotNone(
+            archived_job_from_db, "Failed job should be moved to archive"
+        )
+        self.assertEqual(archived_job_from_db.status, "FAILED")
+        self.assertEqual(
+            archived_job_from_db.error, "Task failed due to invalid input data"
+        )
+        self.assertEqual(
+            archived_job_from_db.results, {"error_details": "Validation failed"}
+        )
+
+        # Verify the job is no longer in the main job table
+        main_job = self.queuer.db_job.select_job(archived_job.rid)
+        self.assertIsNone(main_job, "Failed job should be removed from main table")
+
+    def test_select_all_jobs_from_archive(self):
+        """Test selecting all jobs from archive with pagination."""
+        # Create and archive multiple jobs with different statuses
+        archived_jobs = []
+
+        for i in range(3):
+            job = Job(
+                task_name=f"archive_test_task_{i}",
+                parameters=[f"param_{i}"],
+                status=JobStatus.RUNNING,
+            )
+            inserted_job = self.queuer.db_job.insert_job(job)
+
+            # Update each job with different final status
+            if i == 0:
+                inserted_job.status = "SUCCEEDED"
+                inserted_job.results = {"success": True}
+            elif i == 1:
+                inserted_job.status = "FAILED"
+                inserted_job.error = f"Error in job {i}"
+            else:
+                inserted_job.status = "CANCELLED"
+
+            # Archive the job
+            archived_job = self.queuer.db_job.update_job_final(inserted_job)
+            archived_jobs.append(archived_job)
+
+        # Test retrieving all archived jobs
+        retrieved_jobs = self.queuer.db_job.select_all_jobs_from_archive(entries=10)
+
+        # Should have at least our 3 test jobs
+        self.assertGreaterEqual(len(retrieved_jobs), 3)
+
+        # Find our test jobs in the results
+        our_jobs = [
+            job
+            for job in retrieved_jobs
+            if job.task_name.startswith("archive_test_task_")
+        ]
+        self.assertEqual(len(our_jobs), 3)
+
+        # Verify the jobs have the correct statuses and error information
+        succeeded_job = None
+        failed_job = None
+        cancelled_job = None
+
+        for job in our_jobs:
+            if job.status == "SUCCEEDED":
+                succeeded_job = job
+            elif job.status == "FAILED":
+                failed_job = job
+            elif job.status == "CANCELLED":
+                cancelled_job = job
+
+        self.assertIsNotNone(succeeded_job, "Should have found succeeded job")
+        self.assertIsNotNone(failed_job, "Should have found failed job")
+        self.assertIsNotNone(cancelled_job, "Should have found cancelled job")
+
+        # Verify error information is preserved
+        self.assertIsNotNone(failed_job.error)
+        self.assertIn("Error in job", failed_job.error)
+
 
 # Test cases that require running queuer (integration tests)
 class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
