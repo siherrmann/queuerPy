@@ -29,6 +29,14 @@ class ProcessRunner:
         self.process: Optional[mp.Process] = None
         self._result_queue: Optional[mp.Queue] = None
         self._exception_queue: Optional[mp.Queue] = None
+        self._cancelled = False
+
+    def __del__(self):
+        """Ensure cleanup on object destruction."""
+        try:
+            self._cleanup_resources()
+        except Exception:
+            pass
 
     def run(self) -> bool:
         """Start task execution in separate process."""
@@ -72,31 +80,46 @@ class ProcessRunner:
                 raise TimeoutError("Task timed out")
 
             # Check for exceptions first
-            if not self._exception_queue.empty():
+            if self._exception_queue is not None and not self._exception_queue.empty():
                 exception = self._exception_queue.get()
                 raise exception
 
             # Get the result
-            if not self._result_queue.empty():
-                return self._result_queue.get()
+            result = None
+            if self._result_queue is not None and not self._result_queue.empty():
+                result = self._result_queue.get()
             else:
-                # Process completed but no result - might have been cancelled
-                if self.process.exitcode != 0:
+                # Process completed but no result - check if cancelled
+                if self._cancelled:
+                    self._cleanup_resources()
+                    raise asyncio.CancelledError("Process was cancelled")
+                elif self.process.exitcode != 0:
+                    self._cleanup_resources()
                     raise Exception(f"Process exited with code {self.process.exitcode}")
                 else:
+                    self._cleanup_resources()
                     raise Exception("No result available")
 
+            self._cleanup_resources()
+            return result
+
         except TimeoutError:
+            self._cleanup_resources()
             raise
         except Exception as e:
+            self._cleanup_resources()
             raise e
 
     def cancel(self) -> bool:
         """Cancel the running process."""
         if self.process is None or not self.process.is_alive():
+            self._cleanup_resources()
             return False
 
         try:
+            # Mark as cancelled first
+            self._cancelled = True
+
             # Terminate the process
             self.process.terminate()
 
@@ -108,10 +131,12 @@ class ProcessRunner:
                 self.process.kill()
                 self.process.join()
 
+            self._cleanup_resources()
             return True
 
         except Exception as e:
             print(f"Error cancelling process: {e}")
+            self._cleanup_resources()
             return False
 
     def is_running(self) -> bool:
@@ -119,6 +144,23 @@ class ProcessRunner:
         if self.process is None:
             return False
         return self.process.is_alive()
+
+    def _cleanup_resources(self):
+        """Clean up multiprocessing resources."""
+        try:
+            # Close and join_thread on queues to properly clean them up
+            if self._result_queue is not None:
+                self._result_queue.close()
+                self._result_queue.join_thread()
+                self._result_queue = None
+
+            if self._exception_queue is not None:
+                self._exception_queue.close()
+                self._exception_queue.join_thread()
+                self._exception_queue = None
+
+        except Exception:
+            pass  # Ignore cleanup errors
 
     def _get_pool(self):
         """Compatibility method for tests - returns None since we don't use a shared pool."""

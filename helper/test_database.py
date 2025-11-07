@@ -5,55 +5,50 @@ Simplified testcontainers implementation for reliable testing.
 
 import os
 from testcontainers.postgres import PostgresContainer
-from testcontainers.core.waiting_utils import wait_for_logs
-from testcontainers.core.container import DockerContainer
-from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from helper.database import Database, DatabaseConfiguration
-
-# Disable testcontainers Reaper for more reliable container management
-os.environ["TESTCONTAINERS_REAPER_DISABLED"] = "true"
-os.environ["TESTCONTAINERS_RYUK_DISABLED"] = "true"
 
 
 class DatabaseTestMixin:
     """
     Simple mixin class for test cases that need PostgreSQL database containers.
+    Uses lazy initialization to avoid creating containers during test discovery.
     """
 
     @classmethod
     def setup_class(cls):
-        """Set up PostgreSQL container for the entire test class."""
-        cls.container = PostgresContainer("timescale/timescaledb:latest-pg16")
+        """Set up PostgreSQL container for the entire test class (lazy initialization)."""
+        # Only create container if we don't already have one for this class
+        if not hasattr(cls, "_container_initialized"):
+            cls.container = PostgresContainer("timescale/timescaledb:latest-pg16")
+            cls.container.start()
 
-        # Use modern structured wait strategy
-        cls.container = cls.container.waiting_for(
-            LogMessageWaitStrategy("database system is ready to accept connections")
-        )
-        cls.container.start()
+            # Set environment variables for database configuration
+            cls._set_database_env_vars()
 
-        # Set environment variables for database configuration
-        cls._set_database_env_vars()
-
-        # Create database configuration
-        cls.db_config = DatabaseConfiguration(
-            host=cls.container.get_container_host_ip(),
-            port=cls.container.get_exposed_port(5432),
-            database=cls.container.dbname,
-            username=cls.container.username,
-            password=cls.container.password,
-            schema="public",
-            sslmode="disable",
-            with_table_drop=True,
-        )
+            # Create database configuration
+            cls.db_config = DatabaseConfiguration(
+                host=cls.container.get_container_host_ip(),
+                port=cls.container.get_exposed_port(5432),
+                database=cls.container.dbname,
+                username=cls.container.username,
+                password=cls.container.password,
+                schema="public",
+                sslmode="disable",
+                with_table_drop=True,
+            )
+            cls._container_initialized = True
 
     @classmethod
     def teardown_class(cls):
         """Clean up PostgreSQL container after all tests."""
-        if hasattr(cls, "container"):
+        if hasattr(cls, "container") and cls.container:
             try:
                 cls.container.stop()
             except Exception:
-                pass  # Ignore cleanup errors
+                pass
+            # Clean up the initialization flag
+            if hasattr(cls, "_container_initialized"):
+                delattr(cls, "_container_initialized")
 
     def setup_method(self, method=None):
         """Set up fresh database connection for each test method."""
@@ -67,7 +62,7 @@ class DatabaseTestMixin:
                     self.db.instance.rollback()
                 self.db.close()
             except Exception:
-                pass  # Ignore cleanup errors
+                pass
 
     @classmethod
     def _set_database_env_vars(cls):

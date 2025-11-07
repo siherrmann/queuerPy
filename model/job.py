@@ -84,10 +84,10 @@ class Job:
         """Create job from dictionary."""
         job: Job = cls()
         job.id = data.get("id", 0)
-        if "rid" in data:
+        if "rid" in data and data["rid"]:
             job.rid = UUID(data["rid"])
         job.worker_id = data.get("worker_id", 0)
-        if "worker_rid" in data:
+        if "worker_rid" in data and data["worker_rid"]:
             job.worker_rid = UUID(data["worker_rid"])
         job.task_name = data.get("task_name", "")
         job.parameters = data.get("parameters", [])
