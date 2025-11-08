@@ -149,25 +149,6 @@ class AsyncTask:
         return self._done.is_set()
 
 
-# Simple factory functions
-def new_runner(
-    task: Callable, parameters: List[Any] = None, options: List[OnError] = None
-) -> AsyncTask:
-    """Create AsyncTask for shared event loop execution."""
-    return AsyncTask(task, parameters, options)
-
-
-def new_runner_from_job(task: Callable, job) -> AsyncTask:
-    """Create AsyncTask from job object."""
-    parameters = getattr(job, "parameters", [])
-    options = (
-        [getattr(job, "options", None)]
-        if hasattr(job, "options") and job.options
-        else []
-    )
-    return AsyncTask(task, parameters, options)
-
-
 def go_func(func: Callable, *args, **kwargs) -> AsyncTask:
     """Go-like async function execution."""
     if kwargs:

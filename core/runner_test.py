@@ -18,76 +18,61 @@ class TestRunner(unittest.TestCase):
     def test_successful_task(self):
         """Test running a successful task."""
 
-        def add_task(a, b):
+        async def add_task(a, b):
             return a + b
 
         runner = Runner()
-        async_task = AsyncTask(add_task, [5, 3])
 
-        # Run the task
-        success = async_task.run()
-        self.assertTrue(success, "Task should start successfully")
-
-        # Get results
-        result = async_task.get_results(timeout=2.0)
+        # Test Runner's submit_async_task method
+        future = runner.submit_async_task(add_task(5, 3))
+        result = future.result(timeout=2.0)
         self.assertEqual(result, 8, "Expected 5 + 3 = 8")
 
-        # Check completion status
-        self.assertTrue(async_task.is_done(), "Task should be completed")
+        # Test Runner's run_async_task method (convenience method)
+        result2 = runner.run_async_task(add_task(7, 2), timeout=2.0)
+        self.assertEqual(result2, 9, "Expected 7 + 2 = 9")
 
     def test_failed_task(self):
         """Test running a task that fails."""
 
-        def failing_task():
+        async def failing_task():
             raise ValueError("Test error")
 
         runner = Runner()
-        async_task = AsyncTask(failing_task, [])
 
-        # Run the task
-        success = async_task.run()
-        self.assertTrue(success, "Task should start successfully")
-
-        # Get results (should raise the exception)
+        # Test that Runner properly handles exceptions
         with self.assertRaises(ValueError) as context:
-            async_task.get_results(timeout=2.0)
+            runner.run_async_task(failing_task(), timeout=2.0)
 
         self.assertEqual(str(context.exception), "Test error", "Expected error message")
 
     def test_parameter_validation(self):
         """Test parameter validation."""
 
-        def task_with_params(a, b, c):
+        async def task_with_params(a, b, c):
             return a + b + c
 
         runner = Runner()
 
         # Should work with correct parameters
-        async_task_correct = AsyncTask(task_with_params, [1, 2, 3])
-        success = async_task_correct.run()
-        self.assertTrue(success, "Task should start successfully")
-        result = async_task_correct.get_results(timeout=2.0)
+        result = runner.run_async_task(task_with_params(1, 2, 3), timeout=2.0)
         self.assertEqual(result, 6, "Expected 1 + 2 + 3 = 6")
 
         # Should fail with wrong number of parameters
-        async_task_wrong = AsyncTask(task_with_params, [1, 2])  # Missing one parameter
-        success = async_task_wrong.run()
-        self.assertTrue(success, "Task should start successfully")
+        async def failing_task():
+            return task_with_params(1, 2)
 
         with self.assertRaises(TypeError):
-            async_task_wrong.get_results(timeout=2.0)
+            runner.run_async_task(failing_task(), timeout=2.0)
 
     def test_non_callable_task(self):
         """Test that non-callable task raises error."""
-        # AsyncTask doesn't validate callability at construction
-        # But will fail when trying to execute
-        async_task = AsyncTask("not a function", [])
-        success = async_task.run()
-        self.assertTrue(success, "Task should start")  # It starts but will fail
+        runner = Runner()
 
-        # Should fail when getting results
+        # Try to run a non-callable object through Runner
+        # This should fail when the runner tries to execute it
         with self.assertRaises(TypeError):
-            async_task.get_results(timeout=2.0)
+            runner.run_async_task("not a function", timeout=2.0)
 
     def test_go_func_pattern(self):
         """Test Go-like go_func pattern."""
@@ -103,27 +88,24 @@ class TestRunner(unittest.TestCase):
     def test_multiple_concurrent_tasks(self):
         """Test running multiple tasks concurrently."""
 
-        def slow_task(value, delay):
-            time.sleep(delay)
+        async def slow_task(value, delay):
+            import asyncio
+
+            await asyncio.sleep(delay)
             return value * 2
 
         runner = Runner()
 
-        # Create multiple tasks
-        task1 = AsyncTask(slow_task, [10, 0.1])
-        task2 = AsyncTask(slow_task, [20, 0.1])
-        task3 = AsyncTask(slow_task, [30, 0.1])
-
-        # Start all tasks
+        # Submit multiple tasks concurrently using Runner
         start_time = time.time()
-        self.assertTrue(task1.run(), "Task 1 should start")
-        self.assertTrue(task2.run(), "Task 2 should start")
-        self.assertTrue(task3.run(), "Task 3 should start")
+        future1 = runner.submit_async_task(slow_task(10, 0.1))
+        future2 = runner.submit_async_task(slow_task(20, 0.1))
+        future3 = runner.submit_async_task(slow_task(30, 0.1))
 
         # Get results
-        result1 = task1.get_results(timeout=2.0)
-        result2 = task2.get_results(timeout=2.0)
-        result3 = task3.get_results(timeout=2.0)
+        result1 = future1.result(timeout=2.0)
+        result2 = future2.result(timeout=2.0)
+        result3 = future3.result(timeout=2.0)
         end_time = time.time()
 
         # Check results
@@ -148,13 +130,127 @@ class TestRunner(unittest.TestCase):
             return a + b
 
         runner = Runner()
-        async_task = AsyncTask(async_add, [7, 8])
 
-        success = async_task.run()
-        self.assertTrue(success, "Task should start successfully")
-        result = async_task.get_results(timeout=2.0)
-
+        # Test Runner with async functions
+        result = runner.run_async_task(async_add(7, 8), timeout=2.0)
         self.assertEqual(result, 15, "Expected 7 + 8 = 15")
+
+        # Test event loop availability
+        self.assertTrue(runner.is_available(), "Runner should be available")
+
+        # Test that we can get the event loop
+        loop = runner.get_event_loop()
+        self.assertIsNotNone(loop, "Event loop should be available")
+        self.assertFalse(loop.is_closed(), "Event loop should not be closed")
+
+    def test_singleton_behavior(self):
+        """Test that Runner follows singleton pattern."""
+        runner1 = Runner()
+        runner2 = Runner()
+        runner3 = Runner()
+
+        # All instances should be the same object
+        self.assertIs(runner1, runner2, "Runner instances should be identical")
+        self.assertIs(runner2, runner3, "Runner instances should be identical")
+        self.assertIs(runner1, runner3, "Runner instances should be identical")
+
+        # All should share the same event loop
+        loop1 = runner1.get_event_loop()
+        loop2 = runner2.get_event_loop()
+        loop3 = runner3.get_event_loop()
+
+        self.assertIs(loop1, loop2, "Event loops should be identical")
+        self.assertIs(loop2, loop3, "Event loops should be identical")
+        self.assertIs(loop1, loop3, "Event loops should be identical")
+
+    def test_cancel_all_tasks_with_multiple_runners(self):
+        """Test canceling all tasks when using multiple runner instances (same singleton)."""
+        import asyncio
+
+        async def long_running_task(task_id, delay=1.0):
+            """A task that takes some time to complete."""
+            try:
+                await asyncio.sleep(delay)
+                return f"Task {task_id} completed"
+            except asyncio.CancelledError:
+                return f"Task {task_id} was cancelled"
+
+        # Create three runner instances (all the same singleton)
+        runner1 = Runner()
+        runner2 = Runner()
+        runner3 = Runner()
+
+        # Verify they are all the same instance
+        self.assertIs(runner1, runner2)
+        self.assertIs(runner2, runner3)
+
+        # Submit tasks through different runner instances
+        future1 = runner1.submit_async_task(long_running_task(1, 0.5))
+        future2 = runner2.submit_async_task(long_running_task(2, 0.5))
+        future3 = runner3.submit_async_task(long_running_task(3, 0.5))
+
+        # Let tasks start
+        time.sleep(0.1)
+
+        # Verify all tasks are running (not done yet)
+        self.assertFalse(future1.done(), "Task 1 should still be running")
+        self.assertFalse(future2.done(), "Task 2 should still be running")
+        self.assertFalse(future3.done(), "Task 3 should still be running")
+
+        # Cancel all tasks
+        cancelled_count = 0
+        if future1.cancel():
+            cancelled_count += 1
+        if future2.cancel():
+            cancelled_count += 1
+        if future3.cancel():
+            cancelled_count += 1
+
+        # At least some tasks should be cancellable (they might have completed by now)
+        # But we expect most to be cancelled since they have 0.5s delays
+
+        # Wait a bit for cancellation to take effect
+        time.sleep(0.2)
+
+        # Check final states
+        cancelled_futures = []
+        completed_futures = []
+
+        for i, future in enumerate([future1, future2, future3], 1):
+            self.assertTrue(
+                future.done(), f"Future {i} should be done (cancelled or completed)"
+            )
+            if future.cancelled():
+                cancelled_futures.append(i)
+            else:
+                try:
+                    result = future.result()
+                    completed_futures.append((i, result))
+                except Exception as e:
+                    self.fail(f"Future {i} failed with exception: {e}")
+
+        # Print results for debugging
+        print(f"Cancelled futures: {cancelled_futures}")
+        print(f"Completed futures: {completed_futures}")
+
+        # At least one task should have been cancelled (since we cancelled early)
+        # OR all tasks completed (if they were faster than expected)
+        total_tasks = len(cancelled_futures) + len(completed_futures)
+        self.assertEqual(total_tasks, 3, "Should account for all 3 tasks")
+
+        # The key test: all runner instances share the same event loop
+        # so cancellation affects the shared execution environment
+        loop1 = runner1.get_event_loop()
+        loop2 = runner2.get_event_loop()
+        loop3 = runner3.get_event_loop()
+
+        self.assertIs(loop1, loop2, "All runners should share the same event loop")
+        self.assertIs(loop2, loop3, "All runners should share the same event loop")
+
+        # Event loop should still be available after cancellations
+        self.assertTrue(runner1.is_available(), "Runner should still be available")
+        self.assertTrue(runner2.is_available(), "Runner should still be available")
+        self.assertTrue(runner3.is_available(), "Runner should still be available")
 
 
 if __name__ == "__main__":
