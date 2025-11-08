@@ -1,15 +1,9 @@
-"""
-Test cases for the singleton Runner - mirrors Go tests.
-"""
+"""Test cases for the singleton Runner."""
 
 import unittest
 import time
-import sys
-import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from core.runner import Runner, AsyncTask, go_func
+from .runner import Runner, AsyncTask, go_func
 
 
 class TestRunner(unittest.TestCase):
@@ -251,6 +245,19 @@ class TestRunner(unittest.TestCase):
         self.assertTrue(runner1.is_available(), "Runner should still be available")
         self.assertTrue(runner2.is_available(), "Runner should still be available")
         self.assertTrue(runner3.is_available(), "Runner should still be available")
+
+    def test_go_func_standalone(self):
+        """Test the standalone go_func function equivalent to Go's 'go func()'."""
+
+        def add_task(a, b):
+            return a + b
+
+        # Test go_func standalone function (not a Runner method)
+        task = go_func(add_task, 10, 5)
+        result = task.get_results(timeout=1.0)
+        self.assertEqual(
+            result, 15, "go_func should execute function and return result"
+        )
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import multiprocessing as mp
 import asyncio
 import time
 from typing import Any, List, Optional, Callable
+from concurrent.futures import TimeoutError
 
 
 def _execute_task(task: Callable, parameters: List[Any]) -> Any:

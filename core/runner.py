@@ -7,11 +7,6 @@ import threading
 import logging
 import time
 from typing import Any, List, Optional, Callable
-import sys
-import os
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.options_on_error import OnError
 
