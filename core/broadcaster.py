@@ -1,84 +1,77 @@
 """
-Broadcaster using asyncio for fully async-aware messaging.
+Broadcaster using asyncio for fully async-aware notifications.
 
-This implementation uses asyncio throughout for consistent async behavior.
-Uses singleton pattern to ensure all queuer instances share the same broadcaster.
+This implementation uses asyncio.Queue for consistent async behavior and follows
+the singleton broadcaster pattern for sharing broadcasters across the system.
 """
 
 import asyncio
-from typing import TypeVar, Generic, Dict, ClassVar
+from typing import TypeVar, Generic, Dict
+import uuid
 
 T = TypeVar("T")
 
-# Global registry of broadcasters by name
-_broadcasters: Dict[str, "Broadcaster"] = {}
-_broadcaster_lock = asyncio.Lock()
+# Global registry for singleton broadcasters
+_broadcaster_registry: Dict[str, "Broadcaster"] = {}
 
 
-async def new_broadcaster(name: str) -> "Broadcaster[T]":
-    """
-    Create a new broadcaster or return existing one.
-    Mirrors Go's NewBroadcaster function but with singleton behavior.
-    """
-    async with _broadcaster_lock:
-        if name not in _broadcasters:
-            _broadcasters[name] = Broadcaster[T](name)
-        return _broadcasters[name]
+class BroadcasterQueue(asyncio.Queue[T]):
+    """An asyncio.Queue with a broadcaster ID for tracking."""
 
-
-def new_broadcaster_sync(name: str) -> "Broadcaster[T]":
-    """
-    Synchronous version for use in non-async contexts.
-    """
-    # For backwards compatibility, create directly if no event loop
-    try:
-        loop = asyncio.get_running_loop()
-        # We can't use async here, so check if it exists and create if not
-        if name not in _broadcasters:
-            _broadcasters[name] = Broadcaster[T](name)
-        return _broadcasters[name]
-    except RuntimeError:
-        # No event loop running, create directly
-        if name not in _broadcasters:
-            _broadcasters[name] = Broadcaster[T](name)
-        return _broadcasters[name]
+    def __init__(self):
+        super().__init__()
+        self._broadcaster_id: str = ""
 
 
 class Broadcaster(Generic[T]):
-    """A broadcaster using asyncio queues for fully async messaging."""
+    """A broadcaster that manages async listeners and broadcasts messages."""
+
+    def __new__(cls, name: str):
+        """Singleton pattern: return existing instance if it exists."""
+        if name not in _broadcaster_registry:
+            instance = super().__new__(cls)
+            _broadcaster_registry[name] = instance
+            return instance
+        return _broadcaster_registry[name]
 
     def __init__(self, name: str):
-        """Initialize broadcaster."""
-        self.name: str = name
-        self.listeners: Dict[asyncio.Queue, bool] = {}
-        self.mutex: asyncio.Lock = asyncio.Lock()
+        """Initialize a new broadcaster (only called once per unique name)."""
+        if not hasattr(self, "name"):
+            self.name = name
+            self.listeners: Dict[str, asyncio.Queue[T]] = {}
+            self._lock = asyncio.Lock()
+            self._broadcaster_id: str = ""
 
-    async def subscribe(self) -> asyncio.Queue:
-        """Subscribe and get an asyncio queue."""
-        ch = asyncio.Queue(maxsize=100)  # Large buffer to avoid blocking
+    async def subscribe(self) -> BroadcasterQueue[T]:
+        """Subscribe to broadcasts and return a queue for receiving messages."""
+        queue = BroadcasterQueue[T]()
+        queue._broadcaster_id = str(uuid.uuid4())
 
-        async with self.mutex:
-            self.listeners[ch] = True
+        async with self._lock:
+            self.listeners[queue._broadcaster_id] = queue
 
-        return ch
+        return queue
 
-    async def unsubscribe(self, ch: asyncio.Queue) -> None:
-        """Unsubscribe a channel."""
-        async with self.mutex:
-            if ch in self.listeners:
-                del self.listeners[ch]
+    async def unsubscribe(self, queue: BroadcasterQueue[T]) -> None:
+        """Unsubscribe a queue from broadcasts."""
+        queue_id = queue._broadcaster_id
+        async with self._lock:
+            if queue_id in self.listeners:
+                del self.listeners[queue_id]
 
-    async def broadcast(self, msg: T) -> None:
-        """Broadcast message to all channels."""
-        async with self.mutex:
-            listeners = list(self.listeners.keys())
+    async def broadcast(self, message: T) -> None:
+        """Broadcast a message to all subscribers."""
+        async with self._lock:
+            current_listeners = list(self.listeners.values())
 
-        for ch in listeners:
+        # Send to all listeners without holding the lock
+        for queue in current_listeners:
             try:
-                # Non-blocking send to buffered channel
-                ch.put_nowait(msg)
+                queue.put_nowait(message)
             except asyncio.QueueFull:
-                # Remove failed channels
-                async with self.mutex:
-                    if ch in self.listeners:
-                        del self.listeners[ch]
+                pass
+
+
+def new_broadcaster(name: str) -> Broadcaster:
+    """Get or create a singleton broadcaster with the given name."""
+    return Broadcaster(name)

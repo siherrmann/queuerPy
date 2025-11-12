@@ -720,9 +720,19 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
 
     def tearDown(self):
         """Clean up after each test method."""
-        if hasattr(self, "queuer") and self.queuer._running:
-            self.queuer.stop()
-        super().teardown_method()
+        if hasattr(self, "queuer") and self.queuer:
+            try:
+                # Stop the queuer properly to avoid resource leaks
+                self.queuer.stop()
+                # Add a small delay to allow threads to fully terminate
+                import time
+
+                time.sleep(0.1)
+            except Exception as e:
+                # Log but don't fail the test cleanup
+                print(f"Warning: Error stopping queuer in tearDown: {e}")
+
+        super().tearDown()
 
     def test_add_task(self):
         """Test adding a task."""

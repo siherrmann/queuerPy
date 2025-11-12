@@ -12,14 +12,12 @@ from typing import List, Optional, Any, Union, Callable, TYPE_CHECKING
 from uuid import UUID
 from psycopg.rows import dict_row
 
-from core.runner import Runner
-from core.process_runner import ProcessRunner, new_process_runner_from_job
+from core.runner import Runner, SmallRunner
 from core.retryer import Retryer
 from core.scheduler import Scheduler
 from helper.task import get_task_name_from_interface
 from model.job import Job, JobStatus, new_job as create_job
 from model.options import Options
-from core.runner import Runner
 
 if TYPE_CHECKING:
     from model.batch_job import BatchJob
@@ -99,11 +97,13 @@ class QueuerJobMixin:
         Wait for any job to start and return the job.
         Uses the shared Runner event loop.
         """
-        runner = Runner()
-        return runner.run_async_task(
-            self._wait_for_job_added_inner(timeout_seconds),
-            timeout=timeout_seconds,
+        runner = Runner(
+            task=self._wait_for_job_added_inner,
+            args=(timeout_seconds,),
+            kwargs={},
         )
+        runner.go()
+        return runner.get_results(timeout=timeout_seconds)
 
     async def _wait_for_job_added_inner(
         self, timeout_seconds: float = 30.0
@@ -149,15 +149,17 @@ class QueuerJobMixin:
     ) -> Optional["Job"]:
         """
         Wait for a job to finish and return the job.
-        Uses the shared Runner event loop.
+        Uses SmallRunner for shared state access.
         """
-        runner = Runner()
         # Add buffer to runner timeout to allow async method final check to complete
         runner_timeout = timeout_seconds + 1.0
-        return runner.run_async_task(
-            self._wait_with_listener(job_rid, timeout_seconds),
-            timeout=runner_timeout,
+        runner = SmallRunner(
+            task=self._wait_with_listener,
+            args=(job_rid, timeout_seconds),
+            kwargs={},
         )
+        runner.go()
+        return runner.get_results(timeout=runner_timeout)
 
     async def _wait_with_listener(
         self, job_rid: UUID, timeout_seconds: float
@@ -437,14 +439,6 @@ class QueuerJobMixin:
 
         logger.info(f"Found {len(jobs)} jobs to run")
 
-        # Get the shared Runner instance
-        runner = Runner()
-        if not runner.is_available():
-            logger.error(
-                "No event loop available for running async jobs - queuer not properly started"
-            )
-            raise RuntimeError("Queuer not properly started: no event loop available")
-
         for job in jobs:
             logger.info(f"Processing job: {job.rid}")
             if (
@@ -467,10 +461,10 @@ class QueuerJobMixin:
                 except Exception as e:
                     logger.error(f"Failed to schedule job with Scheduler: {e}")
             else:
-                # Run the job immediately
+                # Run the job immediately using SmallRunner for shared state access
                 logger.info(f"Running job immediately: {job.rid}")
-                runner = Runner()
-                runner.submit_async_task(self._run_job(job))
+                runner = SmallRunner(task=self._run_job, args=(job,), kwargs={})
+                runner.go()
 
     async def _wait_for_job(
         self, job: "Job"
@@ -500,10 +494,11 @@ class QueuerJobMixin:
                 f"Starting ProcessRunner for task {job.task_name} with parameters {job.parameters}"
             )
 
-            # Use ProcessRunner for all job execution
-            runner = new_process_runner_from_job(task, job)
+            # Use Runner for all job execution
+            parameters = getattr(job, "parameters", [])
+            runner = Runner(task, tuple(parameters), {})
 
-            logger.info(f"Created process runner for job {job.rid}")
+            logger.info(f"Created runner for job {job.rid}")
 
             # Store the runner for potential cancellation
             if not hasattr(self, "active_runners"):
@@ -512,34 +507,27 @@ class QueuerJobMixin:
 
             try:
                 # Start the runner
-                if not runner.run():
-                    return None, False, Exception("Failed to start runner")
+                runner.go()
 
-                # For ProcessRunner, wrap get_results in executor
-                async def get_process_results():
-                    def _get_results():
-                        try:
-                            return runner.get_results(
-                                timeout=300
-                            )  # 5 minute timeout for CPU work
-                        except Exception as e:
-                            logger.error(f"ProcessRunner execution error: {e}")
-                            raise
-
-                    loop = Runner().get_event_loop()
-                    return await loop.run_in_executor(None, _get_results)
-
-                results = await get_process_results()
+                # Get results directly since Runner handles execution
+                try:
+                    results = runner.get_results(
+                        timeout=300
+                    )  # 5 minute timeout for CPU work
+                except Exception as e:
+                    logger.error(f"Runner execution error: {e}")
+                    raise
 
                 logger.info(
-                    f"Process runner task {job.task_name} completed with results: {results}"
+                    f"Runner task {job.task_name} completed with results: {results}"
                 )
                 return results, False, None
 
             except asyncio.CancelledError:
                 # Handle cancellation
                 if runner:
-                    runner.cancel()
+                    runner.terminate()
+                    runner.join()
                 return None, True, None
             except Exception as e:
                 logger.error(
@@ -616,26 +604,10 @@ class QueuerJobMixin:
         Mirrors the Go pattern where scheduler calls the function directly.
         """
         try:
-            # Get the shared Runner instance
-            runner = Runner()
-            if not runner.is_available():
-                logger.error("No event loop available for scheduled job execution")
-                return
-
-            # Submit the async _run_job to the event loop
-            future = runner.submit_async_task(self._run_job(job))
-
-            # Don't wait for the result here since this is the scheduled execution
-            def handle_scheduled_done(future_ref):
-                try:
-                    exc = future_ref.exception()
-                    if exc is not None:
-                        logger.error(f"Scheduled job {job.rid} failed: {exc}")
-                except Exception as e:
-                    logger.error(f"Error in scheduled job done callback: {e}")
-
-            future.add_done_callback(handle_scheduled_done)
-            logger.info(f"Scheduled job {job.rid} submitted to event loop")
+            # Create a Runner process for the async job
+            runner = Runner(task=self._run_job, args=(job,), kwargs={})
+            runner.go()
+            logger.info(f"Scheduled job {job.rid} started in process {runner.pid}")
 
         except Exception as e:
             logger.error(f"Error executing scheduled job {job.rid}: {e}")
@@ -651,11 +623,13 @@ class QueuerJobMixin:
             # Cancel the running process if it exists
             if hasattr(self, "active_runners") and job.rid in self.active_runners:
                 runner = self.active_runners[job.rid]
-                if runner.cancel():
+                try:
+                    runner.terminate()
+                    runner.join(timeout=3.0)  # Wait up to 3 seconds for clean shutdown
                     logger.info(f"Cancelled running process for job: {job.rid}")
-                else:
+                except Exception as e:
                     logger.warning(
-                        f"Failed to cancel running process for job: {job.rid}"
+                        f"Failed to cancel running process for job: {job.rid}: {e}"
                     )
 
             job.status = JobStatus.CANCELLED

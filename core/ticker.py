@@ -1,135 +1,146 @@
 """
-Ticker implementation using threading - mirrors Go time.Ticker.
+Threadsafe Ticker - Mirrors Go time.Ticker.
 """
 
-import asyncio
-import threading
+import multiprocessing
 import time
-from typing import Callable, Any, List, Optional
+import inspect
+import asyncio
+import logging
 from datetime import timedelta
+from typing import Callable, Any, Optional, Tuple, Union
 
-from .runner import Runner, AsyncTask
-from helper.task import check_valid_task_with_parameters
+from core.runner import Runner, SmallRunner, go_func
+
+# Configure logging for better visibility in examples
+logging.basicConfig(
+    level=logging.INFO, format="[%(levelname)s] [%(processName)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 class Ticker:
     """
-    A ticker that executes a task at regular intervals.
-    Mirrors Go's Ticker behavior with a task and runner.
+    Manages the background execution of a task at a fixed interval.
+    It delegates execution to a Runner instance which runs the scheduling loop.
     """
 
-    def __init__(self, interval: timedelta, task: Callable, *parameters: Any):
+    def __init__(
+        self, interval: timedelta, task: Callable, use_mp: bool = True, *args, **kwargs
+    ):
         """
-        Create a new ticker with the given interval and task.
+        Initializes the Ticker.
 
-        Args:
-            interval: Time interval between task executions
-            task: Callable task to execute
-            *parameters: Parameters to pass to the task
-
-        Raises:
-            ValueError: If interval is not positive or task is invalid
+        :param interval: The time delta between consecutive task executions.
+        :param task: The synchronous or asynchronous function to execute.
+        :param use_mp: If True (default), uses multiprocessing Runner. If False, uses threading SmallRunner.
+        :param args: Positional arguments to pass to the task function.
+        :param kwargs: Keyword arguments to pass to the task function.
         """
-        if interval.total_seconds() <= 0:
-            raise ValueError("Ticker interval must be positive")
+        if not isinstance(interval, timedelta) or interval.total_seconds() <= 0:
+            raise ValueError("Interval must be a positive timedelta.")
 
-        # Validate task and parameters
-        try:
-            check_valid_task_with_parameters(task, *parameters)
-        except Exception as e:
-            raise ValueError(f"Invalid task or parameters: {e}")
+        self._interval_seconds = interval.total_seconds()
+        self._task = task
+        self._use_mp = use_mp
+        self._args = args
+        self._kwargs = kwargs
+        self._runner: Optional[Union[Runner, SmallRunner]] = None
 
-        self.interval = interval.total_seconds()
-
-        # Store task and parameters for execution
-        self.task = task
-        self.parameters = list(parameters)
-
-        # Threading coordination
-        self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
-
-    def go(self, stop_event: Optional[threading.Event] = None) -> None:
+    def _ticker_function(self):
         """
-        Start the ticker. Runs the task at the specified interval.
-        Mirrors Go's Go(ctx) method.
-
-        Args:
-            stop_event: Optional event to signal when to stop the ticker
+        The continuous loop function executed by the Runner process.
+        It handles all the fixed-rate scheduling logic for the Ticker.
         """
-        if self._thread and self._thread.is_alive():
-            return  # Already running
+        logger.info(f"Ticker loop started with interval {self._interval_seconds}s.")
 
-        # Use provided stop event or create our own
-        if stop_event:
-            self._stop_event = stop_event
-        else:
-            self._stop_event = threading.Event()
+        # Determine if the user's task is async for correct execution inside the loop
+        is_async = inspect.iscoroutinefunction(self._task)
 
-        def ticker_loop():
-            """Main ticker loop."""
-            # Run initial task
+        while True:
+            start_time = time.monotonic()
             try:
-                self._run_task()
+                if is_async:
+                    asyncio.run(self._task(*self._args, **self._kwargs))
+                else:
+                    self._task(*self._args, **self._kwargs)
             except Exception as e:
-                print(f"Error running initial task: {e}")
+                logger.error(f"Scheduled task failed: {e.__class__.__name__}: {e}")
 
-            # Start ticker loop
-            while not self._stop_event.is_set():
-                # Wait for interval or stop signal
-                if self._stop_event.wait(timeout=self.interval):
-                    # Stop event was set, exit
-                    break
+            elapsed_time = time.monotonic() - start_time
+            sleep_duration = self._interval_seconds - elapsed_time
 
-                # Run the task
-                try:
-                    self._run_task()
-                except Exception as e:
-                    print(f"Error running task: {e}")
-                    # Continue running despite errors
-
-        # Start ticker in separate thread
-        self._thread = threading.Thread(target=ticker_loop, daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        """Stop the ticker."""
-        if self._stop_event:
-            self._stop_event.set()
-
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
-
-    def _run_task(self) -> None:
-        """Execute the task."""
-        try:
-            if asyncio.iscoroutinefunction(self.task):
-                # For async tasks, use go_func from runner
-                from .runner import go_func
-
-                go_func(self.task, *self.parameters)
+            if sleep_duration > 0:
+                time.sleep(sleep_duration)
             else:
-                # For sync tasks, just call directly
-                self.task(*self.parameters)
-        except Exception as e:
-            print(f"Task execution error: {e}")
-            raise
+                logger.warning(
+                    f"Scheduled task took too long ({elapsed_time:.3f}s). "
+                    f"Interval {self._interval_seconds}s exceeded. Skipping sleep."
+                )
 
+    def go(self):
+        """
+        Starts the background runner process/thread, executing the internal scheduling loop.
+        """
+        if self.is_running():
+            runner_type = "process" if self._use_mp else "thread"
+            runner_id = getattr(
+                self._runner, "pid", getattr(self._runner, "ident", "unknown")
+            )
+            logger.warning(
+                f"Ticker for '{self._task.__name__}' is already running ({runner_type} {runner_id})."
+            )
+            return
 
-def new_ticker(interval: timedelta, task: Callable, *parameters: Any) -> Ticker:
-    """
-    Create a new ticker.
-    Mirrors Go's NewTicker function.
+        logger.info(
+            f"Starting Ticker for '{self._task.__name__}' using {'multiprocessing' if self._use_mp else 'threading'}..."
+        )
 
-    Args:
-        interval: Time interval between task executions
-        task: Callable task to execute
-        *parameters: Parameters to pass to the task
+        # Use go_func to create the appropriate runner type
+        self._runner = go_func(self._ticker_function, use_mp=self._use_mp)
 
-    Returns:
-        New Ticker instance
+        runner_type = "process" if self._use_mp else "thread"
+        runner_id = getattr(
+            self._runner, "pid", getattr(self._runner, "ident", "unknown")
+        )
+        logger.info(f"Ticker started in {runner_type} {runner_id}.")
 
-    Raises:
-        ValueError: If interval is not positive or task is invalid
-    """
-    return Ticker(interval, task, *parameters)
+    def stop(self):
+        """
+        Stops the background runner process/thread.
+        """
+        if self.is_running():
+            runner_type = "process" if self._use_mp else "thread"
+            runner_id = getattr(
+                self._runner, "pid", getattr(self._runner, "ident", "unknown")
+            )
+
+            logger.info(
+                f"Stopping Ticker for '{self._task.__name__}' ({runner_type} {runner_id})..."
+            )
+
+            if isinstance(self._runner, SmallRunner):
+                # SmallRunner is a thread - termination is not possible, only graceful joining
+                logger.info(
+                    "SmallRunner detected - termination not possible, waiting for thread to complete..."
+                )
+                self._runner.join(timeout=5.0)  # Wait up to 5 seconds
+                if self._runner.is_alive():
+                    logger.warning(
+                        "SmallRunner thread did not complete within timeout - may continue running"
+                    )
+            else:
+                # Runner is a process - can be terminated
+                self._runner.terminate()
+                self._runner.join()
+
+            self._runner = None
+            logger.info(f"Ticker stopped.")
+        else:
+            logger.warning(f"Ticker for '{self._task.__name__}' is not running.")
+
+    def is_running(self) -> bool:
+        """
+        Checks if the runner process/thread is currently active.
+        """
+        return self._runner is not None and self._runner.is_alive()

@@ -96,11 +96,49 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
             try:
                 # Stop the queuer properly to avoid resource leaks
                 self.queuer.stop()
+                # Add a small delay to allow threads to fully terminate
+                import time
+
+                time.sleep(0.1)
             except Exception as e:
                 # Log but don't fail the test cleanup
                 print(f"Warning: Error stopping queuer in tearDown: {e}")
 
-        super().teardown_method()
+        super().tearDown()
+
+    def _cleanup_remaining_threads(self):
+        """Clean up any remaining threads that might cause segfaults."""
+        import threading
+        import time
+
+        # Get all active threads
+        active_threads = threading.enumerate()
+        main_thread = threading.main_thread()
+
+        # Find threads that aren't the main thread
+        background_threads = [
+            t for t in active_threads if t != main_thread and t.is_alive()
+        ]
+
+        if background_threads:
+            print(
+                f"Warning: Found {len(background_threads)} background threads still running"
+            )
+
+            # Try to join them with a timeout
+            for thread in background_threads:
+                if hasattr(thread, "_stop_event"):
+                    # This is likely a ticker or similar - try to stop it
+                    try:
+                        thread._stop_event.set()
+                    except:
+                        pass
+
+                # Try to join with a short timeout
+                try:
+                    thread.join(timeout=0.5)
+                except:
+                    pass
 
     def test_add_job_success_with_nil_options(self):
         """Test successfully adding a job with nil options."""
@@ -462,9 +500,19 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
 
     def tearDown(self):
         """Clean up after each test method."""
-        if hasattr(self, "queuer"):
-            self.queuer.stop()
-        super().teardown_method()
+        if hasattr(self, "queuer") and self.queuer:
+            try:
+                # Stop the queuer properly to avoid resource leaks
+                self.queuer.stop()
+                # Add a small delay to allow threads to fully terminate
+                import time
+
+                time.sleep(0.1)
+            except Exception as e:
+                # Log but don't fail the test cleanup
+                print(f"Warning: Error stopping queuer in tearDown: {e}")
+
+        super().tearDown()
 
     def test_job_execution_success(self):
         """Test successful job execution using wait_for_job_finished."""
