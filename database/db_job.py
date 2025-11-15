@@ -12,7 +12,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from helper.database import Database
-from helper.sql import SQLLoader
+from helper.sql import SQLLoader, run_ddl
 from model.job import Job, JobStatus
 from model.worker import Worker
 
@@ -64,16 +64,12 @@ class JobDBHandler:
 
     def create_table(self) -> None:
         """Create job table using SQL init function."""
-        with self.db.instance.cursor() as cur:
-            cur.execute("SELECT init_job();")
-        self.db.instance.commit()
+        run_ddl(self.db.instance, "SELECT init_job();")
 
     def drop_tables(self) -> None:
-        """Drop job tables."""
-        with self.db.instance.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS job_archive CASCADE;")
-            cur.execute("DROP TABLE IF EXISTS job CASCADE;")
-        self.db.instance.commit()
+        """Drop job tables with DDL deadlock protection."""
+        run_ddl(self.db.instance, "DROP TABLE IF EXISTS job_archive CASCADE;")
+        run_ddl(self.db.instance, "DROP TABLE IF EXISTS job CASCADE;")
 
     def insert_job(self, job: Job) -> Job:
         """

@@ -23,7 +23,7 @@ from database.db_listener import QueuerListener, new_queuer_db_listener
 # Local imports - core components
 from core.broadcaster import Broadcaster, new_broadcaster
 from core.listener import Listener
-from core.runner import Runner
+from core.runner import Runner, SmallRunner
 
 from core.runner import Runner, go_func
 
@@ -170,6 +170,10 @@ class Queuer(
         self.job_db_listener: Optional[QueuerListener] = None
         self.job_archive_db_listener: Optional[QueuerListener] = None
 
+        # Database listener runners (track go_func runners for cleanup)
+        self.job_db_listener_runner: Optional[SmallRunner] = None
+        self.job_archive_db_listener_runner: Optional[SmallRunner] = None
+
         # Job broadcasters and listeners (will be initialized in start())
         self.job_insert_broadcaster: Optional[Broadcaster] = None
         self.job_update_broadcaster: Optional[Broadcaster] = None
@@ -269,6 +273,14 @@ class Queuer(
                 if "closed" not in str(e).lower():
                     self.log.warning(f"Error stopping job listener: {e}")
 
+        # Wait for database listener runners to complete
+        if self.job_db_listener_runner:
+            try:
+                self.job_db_listener_runner.get_results(timeout=2.0)
+                self.job_db_listener_runner = None
+            except Exception as e:
+                self.log.warning(f"Error waiting for job listener runner: {e}")
+
         if self.job_archive_db_listener:
             try:
                 task = go_func(self.job_archive_db_listener.stop, use_mp=False)
@@ -276,6 +288,14 @@ class Queuer(
             except Exception as e:
                 if "closed" not in str(e).lower():
                     self.log.warning(f"Error stopping job archive listener: {e}")
+
+        # Wait for database archive listener runner to complete
+        if self.job_archive_db_listener_runner:
+            try:
+                self.job_archive_db_listener_runner.get_results(timeout=2.0)
+                self.job_archive_db_listener_runner = None
+            except Exception as e:
+                self.log.warning(f"Error waiting for job archive listener runner: {e}")
 
         # Update worker status to stopped
         worker_rid = None
@@ -308,19 +328,11 @@ class Queuer(
         # Cancel all active runners - similar to Go's job cancellation
         for runner_id, runner in list(self.active_runners.items()):
             try:
-                runner.terminate()
-                runner.join()
+                runner.cancel()
                 if runner_id in self.active_runners:
                     del self.active_runners[runner_id]
             except Exception as e:
                 self.log.warning(f"Error cancelling runner {runner_id}: {e}")
-
-        # Shutdown process pool for CPU-intensive tasks
-        try:
-            # No pool shutdown needed for new Runner system
-            self.log.info("Process pool shut down")
-        except Exception as e:
-            self.log.warning(f"Error shutting down process pool: {e}")
 
         # Close database connection
         if hasattr(self, "DB") and self.DB:
@@ -343,6 +355,11 @@ class Queuer(
             status = job_data.get("status")
             job_rid = job_data.get("rid")
 
+            self.log.debug(
+                f"[{self.name}] Job notification details - Status: {status}, RID: {job_rid}"
+            )
+            self.log.debug(f"[{self.name}] Full job data: {job_data}")
+
             if status in ["QUEUED", "SCHEDULED"]:
                 if self._running:
                     job_rid_uuid = UUID(job_data.get("rid"))
@@ -350,6 +367,28 @@ class Queuer(
                         f"[{self.name}] Processing {status} job: {job_rid_uuid}"
                     )
                     go_func(self._run_job_initial, use_mp=False)
+
+                    # Also broadcast the job insertion notification
+                    if (
+                        hasattr(self, "job_insert_broadcaster")
+                        and self.job_insert_broadcaster
+                    ):
+                        job = Job.from_dict(job_data)
+                        self.log.debug(
+                            f"[{self.name}] Broadcasting job insertion for {job.rid}"
+                        )
+                        await self.job_insert_broadcaster.broadcast(job)
+                        self.log.info(
+                            f"[{self.name}] Job insertion notification sent for {job.rid}"
+                        )
+                    else:
+                        self.log.warning(
+                            f"[{self.name}] No job_insert_broadcaster available for notification"
+                        )
+                else:
+                    self.log.warning(
+                        f"[{self.name}] Queuer not running, ignoring {status} job: {job_rid}"
+                    )
             else:
                 self.log.info(f"Job update detected with status: {status}")
                 if (
@@ -375,8 +414,7 @@ class Queuer(
                 if job.rid in self.active_runners:
                     self.log.info(f"Canceling running job: {job.rid}")
                     runner: Runner = self.active_runners[job.rid]
-                    runner.terminate()
-                    runner.join()
+                    runner.cancel()
                     del self.active_runners[job.rid]
             else:
                 self.log.info(f"Job completed with status: {job.status}")
@@ -396,20 +434,30 @@ class Queuer(
         # Start job listener
         if self.job_db_listener:
             try:
-                go_func(self._start_job_listener, False, self._handle_job_notification)
-                self.log.info("Started job database listener")
+                self.log.debug(
+                    f"[{self.name}] Starting job database listener for 'job' channel"
+                )
+                self.job_db_listener_runner = go_func(
+                    self._start_job_listener,
+                    False,
+                    self._handle_job_notification,
+                )
+                self.log.info(f"[{self.name}] Started job database listener")
             except Exception as e:
                 self.log.error(f"Error starting job listener: {e}")
 
         # Start job archive listener
         if self.job_archive_db_listener:
             try:
-                go_func(
+                self.log.debug(
+                    f"[{self.name}] Starting job archive database listener for 'job_archive' channel"
+                )
+                self.job_archive_db_listener_runner = go_func(
                     self._start_job_archive_listener,
                     False,
                     self._handle_job_archive_notification,
                 )
-                self.log.info("Started job archive database listener")
+                self.log.info(f"[{self.name}] Started job archive database listener")
             except Exception as e:
                 self.log.error(f"Error starting job archive listener: {e}")
 

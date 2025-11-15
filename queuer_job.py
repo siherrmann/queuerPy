@@ -8,7 +8,7 @@ import logging
 import threading
 import time
 from datetime import datetime
-from typing import List, Optional, Any, Union, Callable, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, Union, Callable, TYPE_CHECKING
 from uuid import UUID
 from psycopg.rows import dict_row
 
@@ -86,7 +86,7 @@ class QueuerJobMixin:
         for batch_job in batch_jobs:
             options: Optional[Options] = self._merge_options(batch_job.options)
             task_name: str = get_task_name_from_interface(batch_job.task)
-            job: Job = create_job(task_name, batch_job.parameters, options)
+            job: Job = create_job(task_name, options, *batch_job.parameters)
             jobs.append(job)
 
         self.db_job.batch_insert_jobs(jobs)
@@ -401,14 +401,10 @@ class QueuerJobMixin:
             new_job = create_job(task, options, *parameters)
             job = self.db_job.insert_job(new_job)
 
-            # IMMEDIATE PROCESSING - NO POLLING: Process jobs immediately after insertion
-            # This ensures pure notification-driven operation without waiting for notifications
-            logger.debug("Triggering immediate job processing after insertion")
-            try:
-                self._run_job_initial()
-            except Exception as e:
-                logger.warning(f"Error in immediate job processing: {e}")
-                # Don't fail job creation if processing fails
+            # Job processing will be triggered by database notifications
+            # The database will send a pg_notify which will be received by the listener
+            # and processed through _handle_job_notification
+            logger.debug(f"Job {job.rid} inserted, waiting for database notification")
 
             return job
 
@@ -502,21 +498,13 @@ class QueuerJobMixin:
 
             # Store the runner for potential cancellation
             if not hasattr(self, "active_runners"):
-                self.active_runners = {}
+                self.active_runners: Dict[UUID, Runner] = {}
             self.active_runners[job.rid] = runner
 
             try:
                 # Start the runner
                 runner.go()
-
-                # Get results directly since Runner handles execution
-                try:
-                    results = runner.get_results(
-                        timeout=300
-                    )  # 5 minute timeout for CPU work
-                except Exception as e:
-                    logger.error(f"Runner execution error: {e}")
-                    raise
+                results = runner.get_results(timeout=300)
 
                 logger.info(
                     f"Runner task {job.task_name} completed with results: {results}"
@@ -526,8 +514,7 @@ class QueuerJobMixin:
             except asyncio.CancelledError:
                 # Handle cancellation
                 if runner:
-                    runner.terminate()
-                    runner.join()
+                    runner.cancel()
                 return None, True, None
             except Exception as e:
                 logger.error(
@@ -624,8 +611,7 @@ class QueuerJobMixin:
             if hasattr(self, "active_runners") and job.rid in self.active_runners:
                 runner = self.active_runners[job.rid]
                 try:
-                    runner.terminate()
-                    runner.join(timeout=3.0)  # Wait up to 3 seconds for clean shutdown
+                    runner.cancel()
                     logger.info(f"Cancelled running process for job: {job.rid}")
                 except Exception as e:
                     logger.warning(

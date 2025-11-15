@@ -79,6 +79,25 @@ class Job:
             "updated_at": self.updated_at.isoformat(),
         }
 
+    @staticmethod
+    def _parse_datetime(datetime_str: str) -> datetime:
+        """Parse datetime string from PostgreSQL format, handling microseconds correctly."""
+        try:
+            return datetime.fromisoformat(datetime_str)
+        except ValueError:
+            # Handle PostgreSQL microseconds format (can have 1-6 digits)
+            if "." in datetime_str and "T" in datetime_str:
+                # Split datetime and microseconds
+                date_part, time_part = datetime_str.split("T")
+                if "." in time_part:
+                    time_base, microseconds = time_part.split(".")
+                    # Pad or truncate microseconds to 6 digits
+                    microseconds = microseconds.ljust(6, "0")[:6]
+                    formatted_str = f"{date_part}T{time_base}.{microseconds}"
+                    return datetime.fromisoformat(formatted_str)
+            # Fallback: try without microseconds
+            return datetime.fromisoformat(datetime_str.split(".")[0])
+
     @classmethod
     def from_dict(cls, data: dict) -> "Job":
         """Create job from dictionary."""
@@ -95,17 +114,17 @@ class Job:
             job.options = Options.from_dict(data["options"])
         job.status = data.get("status", JobStatus.QUEUED)
         if data.get("scheduled_at"):
-            job.scheduled_at = datetime.fromisoformat(data["scheduled_at"])
+            job.scheduled_at = Job._parse_datetime(data["scheduled_at"])
         if data.get("started_at"):
-            job.started_at = datetime.fromisoformat(data["started_at"])
+            job.started_at = Job._parse_datetime(data["started_at"])
         job.schedule_count = data.get("schedule_count", 0)
         job.attempts = data.get("attempts", 0)
         job.results = data.get("results", [])
         job.error = data.get("error", "")
         if data.get("created_at"):
-            job.created_at = datetime.fromisoformat(data["created_at"])
+            job.created_at = Job._parse_datetime(data["created_at"])
         if data.get("updated_at"):
-            job.updated_at = datetime.fromisoformat(data["updated_at"])
+            job.updated_at = Job._parse_datetime(data["updated_at"])
         return job
 
     @classmethod

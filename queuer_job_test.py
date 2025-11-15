@@ -278,8 +278,9 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
         job1 = self.queuer.add_job(task_mock, 1, "2")
         job2 = self.queuer.add_job(task_mock, 3, "4")
 
-        # Note: Due to immediate processing, jobs are automatically picked up when created
-        # The jobs should now be assigned to the worker and in RUNNING status
+        # In notification-driven processing, jobs need to be manually picked up by workers
+        # Manually trigger job processing to assign jobs to workers
+        self.queuer._run_job_initial()
 
         # Get jobs for this worker
         jobs = self.queuer.get_jobs_by_worker_rid(self.queuer.worker.rid)
@@ -519,6 +520,11 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
         # Add a job
         job = self.queuer.add_job(task_mock, 1, "2")
         self.assertIsNotNone(job)
+
+        # In notification-driven processing, manually trigger job processing
+        # This simulates what would happen when the notification system processes the job
+        print(f"Manually triggering job processing for: {job.rid}")
+        self.queuer._run_job_initial()
 
         # Wait for job to finish using the new method with timeout
         print(f"Waiting for job to finish: {job.rid}")

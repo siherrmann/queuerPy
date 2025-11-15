@@ -8,21 +8,25 @@ import time
 import inspect
 import asyncio
 import logging
+import os
 import traceback
+import queue
 from datetime import timedelta
 from typing import Callable, Any, Dict, Optional, Tuple, Union
 
-# Configure logging for better visibility in examples
-logging.basicConfig(
-    level=logging.INFO, format="[%(levelname)s] [%(processName)s] %(message)s"
-)
-logger = logging.getLogger(__name__)
+from helper.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class Runner(multiprocessing.Process):
     """
     The core execution environment. Manages the execution of a single task
     in a separate, reliably killable multiprocessing context, and retrieves its result.
+
+    :param task: The synchronous or asynchronous function to execute.
+    :param args: Arguments to pass to the task function.
+    :param name_prefix: Prefix for the process name (e.g., "Job-Runner").
     """
 
     def __init__(
@@ -60,11 +64,17 @@ class Runner(multiprocessing.Process):
                 result = asyncio.run(self.task(*self.args, **self.kwargs))
             else:
                 result = self.task(*self.args, **self.kwargs)
-            self._result_queue.put(result)
+
+            try:
+                self._result_queue.put(result)
+            except BrokenPipeError as e:
+                pass
         except Exception as e:
-            logger.error(f"Task execution failed: {e.__class__.__name__}: {e}")
             logger.debug(traceback.format_exc())
-            self._result_queue.put(e)
+            try:
+                self._result_queue.put(e)
+            except BrokenPipeError as e:
+                pass
 
     def get_results(self, timeout: Optional[float] = None) -> Any:
         """
@@ -75,8 +85,10 @@ class Runner(multiprocessing.Process):
         :raises TimeoutError: If the result is not available within the specified timeout.
         :raises Exception: If the task execution in the runner process failed.
         """
+        logger.debug(f"Runner.get_results() called for {self.name}, timeout={timeout}")
         try:
             self.join(timeout=timeout)
+
             if self.is_alive():
                 raise TimeoutError(f"runner timed out after {timeout} seconds.")
 
@@ -86,7 +98,10 @@ class Runner(multiprocessing.Process):
                 else:
                     raise Exception(f"runner failed with code {self.exitcode}")
 
-            result = self._result_queue.get_nowait()
+            try:
+                result = self._result_queue.get_nowait()
+            except Exception as e:
+                raise
 
             if isinstance(result, Exception):
                 raise result
@@ -100,22 +115,28 @@ class Runner(multiprocessing.Process):
         Attempts to cancel the running process.
 
         :returns: True if the process was successfully terminated, False otherwise.
+        :raises: Exception if an error occurs during termination.
         """
         try:
             if self.is_alive():
                 self.terminate()
                 self.join(timeout=5.0)  # Wait up to 5 seconds for clean termination
-                return not self.is_alive()
-            return True  # Already finished
+                result = not self.is_alive()
+                return result
+            logger.debug(f"Runner {self.name}: Already finished")
+            return True
         except Exception as e:
-            logger.error(f"Error cancelling process: {e}")
-            return False
+            raise e
 
 
 class SmallRunner(threading.Thread):
     """
     A lightweight, thread-based runner suitable for tasks needing
     direct access to the parent process's shared state (like heartbeats).
+
+    :param task: The synchronous or asynchronous function to execute.
+    :param args: Arguments to pass to the task function.
+    :param name_prefix: Prefix for the thread name (e.g., "Job-SmallRunner").
     """
 
     def __init__(
@@ -125,12 +146,19 @@ class SmallRunner(threading.Thread):
         kwargs: Dict[str, Any],
         name_prefix: str = "SmallRunner",
     ):
+        """
+        Initializes the SmallRunner thread.
+
+        :param task: The synchronous or asynchronous function to execute.
+        :param args: Arguments to pass to the task function.
+        :param name_prefix: Prefix for the thread name (e.g., "Job-SmallRunner").
+        """
         super().__init__(name=f"{name_prefix}-{task.__name__}", daemon=True)
         self.task = task
         self.args = args
         self.kwargs = kwargs
         self.is_async = inspect.iscoroutinefunction(task)
-        self._result_queue: multiprocessing.Queue = multiprocessing.Queue(1)
+        self._result_queue: queue.Queue = queue.Queue(maxsize=1)
 
     def go(self):
         """Starts the SmallRunner thread in the background."""
@@ -140,6 +168,9 @@ class SmallRunner(threading.Thread):
         """
         The main execution method for the thread.
         """
+        loop_created = False
+        loop = None
+
         try:
             if self.is_async:
                 try:
@@ -147,6 +178,8 @@ class SmallRunner(threading.Thread):
                 except RuntimeError:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
+                    loop_created = True
+
                 result = loop.run_until_complete(self.task(*self.args, **self.kwargs))
             else:
                 result = self.task(*self.args, **self.kwargs)
@@ -154,20 +187,44 @@ class SmallRunner(threading.Thread):
             self._result_queue.put(result)
 
         except Exception as e:
-            logger.error(f"SmallRunner task failed: {e.__class__.__name__}: {e}")
-            logger.debug(traceback.format_exc())
+            logger.error(f"SmallRunner {self.name} task failed: {e}")
             self._result_queue.put(e)
+        finally:
+            if loop_created and loop and not loop.is_closed():
+                try:
+                    pending_tasks = asyncio.all_tasks(loop)
+                    for task in pending_tasks:
+                        task.cancel()
+                    if pending_tasks:
+                        loop.run_until_complete(
+                            asyncio.gather(*pending_tasks, return_exceptions=True)
+                        )
+                    loop.close()
+                except Exception as cleanup_error:
+                    logger.debug(f"error cleaning SmallRunner loop {cleanup_error}")
 
     def get_results(self, timeout: Optional[float] = None) -> Any:
         """
         Waits for the thread to complete and returns the result.
+
+        :param timeout: Time in seconds to wait for the result. If None, waits indefinitely.
+        :returns: The result returned by the executed task function.
+        :raises TimeoutError: If the result is not available within the specified timeout.
+        :raises Exception: If the task execution in the thread failed.
         """
         try:
             self.join(timeout=timeout)
+
             if self.is_alive():
                 raise TimeoutError(f"small runner timed out after {timeout} seconds")
 
-            result = self._result_queue.get(timeout=0.1)
+            try:
+                result = self._result_queue.get(block=False)
+            except queue.Empty:
+                # If queue is empty and thread is done, return None
+                return None
+            except Exception as e:
+                raise
 
             if isinstance(result, Exception):
                 raise result
@@ -194,5 +251,6 @@ def go_func(
         runner = Runner(func, args, kwargs)
     else:
         runner = SmallRunner(func, args, kwargs)
+
     runner.go()
     return runner

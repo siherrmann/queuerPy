@@ -12,7 +12,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from helper.database import Database
-from helper.sql import SQLLoader
+from helper.sql import SQLLoader, run_ddl
 from model.worker import Worker, WorkerStatus
 from model.connection import Connection as ConnectionModel
 
@@ -62,15 +62,11 @@ class WorkerDBHandler:
 
     def create_table(self) -> None:
         """Create worker table using SQL init function. Mirrors Go's CreateTable method."""
-        with self.db.instance.cursor() as cur:
-            cur.execute("SELECT init_worker();")
-        self.db.instance.commit()
+        run_ddl(self.db.instance, "SELECT init_worker();")
 
     def drop_table(self) -> None:
-        """Drop worker table. Mirrors Go's DropTable method."""
-        with self.db.instance.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS worker CASCADE;")
-        self.db.instance.commit()
+        """Drop worker table with DDL deadlock protection. Mirrors Go's DropTable method."""
+        run_ddl(self.db.instance, "DROP TABLE IF EXISTS worker CASCADE;")
 
     def insert_worker(self, worker: Worker) -> Worker:
         """
