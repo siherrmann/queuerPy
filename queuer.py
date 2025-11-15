@@ -6,9 +6,9 @@ Mirrors the Go Queuer struct with Python async patterns.
 # Standard library imports
 import asyncio
 import json
-import logging
 import os
 import threading
+import time
 import traceback
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Callable, Any
@@ -28,6 +28,7 @@ from core.runner import Runner, SmallRunner
 from core.runner import Runner, go_func
 
 # Local imports - model classes
+from helper.error import QueuerError
 from helper.logging import get_logger
 from model.job import Job, JobStatus
 from model.task import Task
@@ -237,6 +238,10 @@ class Queuer(
 
         # Start background tasks
         self._start_listeners()
+
+        # Wait for listeners to be ready (with timeout)
+        self._wait_for_listeners_ready()
+
         self._start_heartbeat_ticker()
         self._start_poll_job_ticker()  # Backup polling every 5 minutes
 
@@ -434,53 +439,34 @@ class Queuer(
 
         :param notification: The notification payload as a string
         """
+        if not self._running:
+            logger.warning(f"Queuer not running, ignoring job notification")
+            return
+
+        if not (
+            hasattr(self, "job_insert_broadcaster") and self.job_insert_broadcaster
+        ):
+            logger.debug(f"[{self.name}] No job_insert_broadcaster available")
+            return
+
+        if not (
+            hasattr(self, "job_update_broadcaster") and self.job_update_broadcaster
+        ):
+            logger.debug(f"[{self.name}] No job_update_broadcaster available")
+            return
+
         try:
-            logger.info(f"[{self.name}] Received notification: {notification[:100]}...")
-            job_data = json.loads(notification)
-            status = job_data.get("status")
-            job_rid = job_data.get("rid")
+            job = Job.from_dict(json.loads(notification))
 
-            logger.debug(
-                f"[{self.name}] Job notification details - Status: {status}, RID: {job_rid}"
-            )
-            logger.debug(f"[{self.name}] Full job data: {job_data}")
+            logger.debug(f"[{self.name}] Received job notification: {job}")
 
-            if status in [JobStatus.QUEUED, JobStatus.SCHEDULED]:
-                if self._running:
-                    job_rid_uuid = UUID(job_data.get("rid"))
-                    logger.info(
-                        f"[{self.name}] Processing {status} job: {job_rid_uuid}"
-                    )
-                    go_func(self._run_job_initial, use_mp=False)
-
-                    # Also broadcast the job insertion notification
-                    if (
-                        hasattr(self, "job_insert_broadcaster")
-                        and self.job_insert_broadcaster
-                    ):
-                        logger.info(
-                            f"[{self.name}] Broadcasting job insertion for job: {job_rid_uuid}"
-                        )
-                        job = Job.from_dict(job_data)
-                        await self.job_insert_broadcaster.broadcast(job)
-                else:
-                    logger.warning(
-                        f"[{self.name}] Queuer not running, ignoring {status} job: {job_rid}"
-                    )
+            if job.status in [JobStatus.QUEUED, JobStatus.SCHEDULED]:
+                go_func(self._run_job_initial, use_mp=False)
+                await self.job_insert_broadcaster.broadcast(job)
             else:
-                logger.info(f"Job update detected with status: {status}")
-                if (
-                    hasattr(self, "job_update_broadcaster")
-                    and self.job_update_broadcaster
-                ):
-                    job = Job.from_dict(job_data)
-                    await self.job_update_broadcaster.broadcast(job)
-
+                await self.job_update_broadcaster.broadcast(job)
         except Exception as e:
             logger.error(f"Error handling job notification: {e}")
-            import traceback
-
-            traceback.print_exc()
 
     async def _handle_job_archive_notification(self, notification):
         """
@@ -537,6 +523,43 @@ class Queuer(
             except Exception as e:
                 logger.error(f"Error starting job archive listener: {e}")
 
+    def _wait_for_listeners_ready(self, timeout_seconds: float = 3.0):
+        """
+        Wait for both database listeners to be ready by checking their connection status.
+
+        :param timeout_seconds: Maximum time to wait for listeners to be ready
+        :raises RuntimeError: If listeners don't become ready within timeout
+        """
+        logger.debug("Waiting for database listeners to be ready...")
+        start_time = time.time()
+
+        while time.time() - start_time < timeout_seconds:
+            job_ready = (
+                self.job_db_listener
+                and hasattr(self.job_db_listener, "connection")
+                and self.job_db_listener.connection is not None
+                and hasattr(self.job_db_listener, "_listening")
+                and self.job_db_listener._listening
+            )
+
+            archive_ready = (
+                self.job_archive_db_listener
+                and hasattr(self.job_archive_db_listener, "connection")
+                and self.job_archive_db_listener.connection is not None
+                and hasattr(self.job_archive_db_listener, "_listening")
+                and self.job_archive_db_listener._listening
+            )
+
+            if job_ready and archive_ready:
+                logger.info("Database listeners are ready")
+                return
+
+            time.sleep(0.1)  # Small delay between checks
+
+        raise RuntimeError(
+            f"Database listeners failed to become ready within {timeout_seconds} seconds"
+        )
+
     def _heartbeat_func(self):
         """Send periodic heartbeats - only updates database, not queuer state."""
         try:
@@ -580,7 +603,10 @@ class Queuer(
 
     async def _start_job_archive_listener(self, handle_job_archive_notification):
         """
-        Start job archive database listener."""
+        Start job archive database listener.
+
+        :param handle_job_archive_notification: The callback to handle job archive notifications
+        """
         await self.job_archive_db_listener.listen(handle_job_archive_notification)
 
     def _start_poll_job_ticker(self):
