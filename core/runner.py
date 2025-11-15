@@ -118,15 +118,18 @@ class Runner(multiprocessing.Process):
         :raises: Exception if an error occurs during termination.
         """
         try:
-            if self.is_alive():
-                self.terminate()
-                self.join(timeout=5.0)  # Wait up to 5 seconds for clean termination
-                result = not self.is_alive()
-                return result
-            logger.debug(f"Runner {self.name}: Already finished")
-            return True
+            if not self.is_alive():
+                logger.debug(f"Runner {self.name}: Already finished")
+                return True
+
+            logger.debug(f"Cancelling runner {self.name}")
+            self.terminate()
+            self.join(timeout=5.0)  # Wait up to 5 seconds for clean termination
+            result = not self.is_alive()
+            return result
         except Exception as e:
-            raise e
+            logger.warning(f"Error cancelling runner {self.name}: {e}")
+            return False
 
 
 class SmallRunner(threading.Thread):
@@ -231,6 +234,29 @@ class SmallRunner(threading.Thread):
 
             return result
         except Exception as e:
+            raise e
+
+    def cancel(self) -> bool:
+        """
+        Attempts to cancel the running thread.
+        Note: Python threads cannot be forcefully terminated, so this is a no-op
+        that provides interface consistency with Runner.
+
+        :returns: True if the thread is not alive, False if still running.
+        """
+        try:
+            if not self.is_alive():
+                logger.debug(f"SmallRunner {self.name}: Already finished")
+                return True
+
+            logger.debug(
+                f"SmallRunner {self.name}: Cannot force terminate thread, waiting for natural completion"
+            )
+            # We can't actually cancel a thread in Python, just check if it's done
+            return not self.is_alive()
+
+        except Exception as e:
+            logger.warning(f"Error checking SmallRunner {self.name}: {e}")
             raise e
 
 

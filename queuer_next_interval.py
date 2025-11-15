@@ -18,21 +18,16 @@ class QueuerNextIntervalMixin:
     Mirrors Go's queuerNextInterval.go functionality.
     """
 
-    def add_next_interval_func(self, nif: Callable) -> 'Worker':
+    def add_next_interval_func(self, nif: Callable) -> "Worker":
         """
         Add a NextIntervalFunc to the worker's available next interval functions.
         Takes a NextIntervalFunc and adds it to the worker's available_next_interval_funcs.
         The function name is derived from the function using helper.get_task_name_from_interface.
 
-        Args:
-            nif: The next interval function to add
-
-        Returns:
-            The updated worker after adding the function
-
-        Raises:
-            ValueError: If function is None
-            RuntimeError: If function already exists or database update fails
+        :param nif: The next interval function to add
+        :return: The updated worker after adding the function
+        :raises ValueError: If function is None
+        :raises RuntimeError: If function already exists or database update fails
         """
         from helper.task import get_task_name_from_interface
 
@@ -58,7 +53,7 @@ class QueuerNextIntervalMixin:
         logger.info(f"NextInterval function added: {nif_name}")
         return worker
 
-    def add_next_interval_func_with_name(self, nif: Callable, name: str) -> 'Worker':
+    def add_next_interval_func_with_name(self, nif: Callable, name: str) -> "Worker":
         """
         Add a NextIntervalFunc to the worker's available next interval functions with a specific name.
         Takes a NextIntervalFunc and a name, checks if the function is not None
@@ -68,16 +63,11 @@ class QueuerNextIntervalMixin:
         This function is useful when you want to add a NextIntervalFunc
         with a specific name that you control, rather than deriving it from the function itself.
 
-        Args:
-            nif: The next interval function to add
-            name: The specific name for the function
-
-        Returns:
-            The updated worker after adding the function with the specified name
-
-        Raises:
-            ValueError: If function is None
-            RuntimeError: If function already exists or database update fails
+        :param nif: The next interval function to add
+        :param name: The specific name for the function
+        :return: The updated worker after adding the function with the specified name
+        :raises ValueError: If function is None
+        :raises RuntimeError: If function already exists or database update fails
         """
         if nif is None:
             raise ValueError("NextIntervalFunc cannot be None")

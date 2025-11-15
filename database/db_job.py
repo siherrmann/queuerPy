@@ -39,10 +39,12 @@ class JobDBHandler:
         # Load SQL functions using helper.sql
         connection: Connection = self.db.instance
         sql_loader: SQLLoader = SQLLoader()
+
         sql_loader.load_notify_sql(
-            connection, with_table_drop
+            connection, force=with_table_drop
         )  # Load notify function first
-        sql_loader.load_job_sql(connection, with_table_drop)
+
+        sql_loader.load_job_sql(connection, force=with_table_drop)
 
         # Always call create_table - it's safe as it uses IF NOT EXISTS and OR REPLACE
         self.create_table()

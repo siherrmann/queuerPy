@@ -5,16 +5,15 @@ Mirrors Go's queuerJob.go functionality.
 
 import asyncio
 import logging
-import threading
-import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, Callable, TYPE_CHECKING
 from uuid import UUID
-from psycopg.rows import dict_row
 
+from core.broadcaster import BroadcasterQueue
 from core.runner import Runner, SmallRunner
 from core.retryer import Retryer
 from core.scheduler import Scheduler
+from helper.error import QueuerError
 from helper.task import get_task_name_from_interface
 from model.job import Job, JobStatus, new_job as create_job
 from model.options import Options
@@ -36,15 +35,10 @@ class QueuerJobMixin:
         """
         Add a job to the queue with the given task and parameters.
 
-        Args:
-            task: Either a function or a string with the task name
-            *parameters: Parameters to pass to the task
-
-        Returns:
-            The created job
-
-        Raises:
-            Exception: If something goes wrong
+        :param task: Either a function or a string with the task name
+        :param parameters: Parameters to pass to the task
+        :returns: The created job
+        :raises Exception: If something goes wrong
         """
         options: Optional[Options] = self._merge_options(None)
         job: Job = self._add_job(task, options, *parameters)
@@ -72,15 +66,12 @@ class QueuerJobMixin:
             logger.error(f"Error adding job with options: {str(e)}")
             raise Exception(f"Adding job: {str(e)}")
 
-    def add_jobs(self, batch_jobs: List["BatchJob"]) -> None:
+    def add_jobs(self, batch_jobs: List["BatchJob"]):
         """
         Add a batch of jobs to the queue.
 
-        Args:
-            batch_jobs: List of BatchJob objects containing task, options, and parameters
-
-        Raises:
-            Exception: If something goes wrong during the process
+        :param batch_jobs: List of BatchJob objects to add
+        :raises Exception: If something goes wrong during the process
         """
         jobs: List[Job] = []
         for batch_job in batch_jobs:
@@ -96,6 +87,9 @@ class QueuerJobMixin:
         """
         Wait for any job to start and return the job.
         Uses the shared Runner event loop.
+
+        :param timeout_seconds: Maximum time to wait for a job to be added
+        :returns: The job that was added, or None if cancelled or timeout
         """
         runner = Runner(
             task=self._wait_for_job_added_inner,
@@ -112,37 +106,29 @@ class QueuerJobMixin:
         Wait for any job to start and return the job.
         Uses the broadcaster approach.
 
-        Args:
-            timeout_seconds: Maximum time to wait for a job to be added
-
-        Returns:
-            The job that was added, or None if cancelled or timeout
+        :param timeout_seconds: Maximum time to wait for a job to be added
+        :returns: The job that was added, or None if cancelled or timeout
+        :raises Exception: If broadcaster is not available
         """
         if (
             not hasattr(self, "job_insert_broadcaster")
             or self.job_insert_broadcaster is None
         ):
-            logger.warning("Job insert broadcaster not available")
-            return None
+            raise Exception("Job insert broadcaster not available")
 
-        # Subscribe to the broadcaster
-        ch = await self.job_insert_broadcaster.subscribe()
-
+        channel: BroadcasterQueue = await self.job_insert_broadcaster.subscribe()
         try:
-            # Wait for job insertion with timeout
-            job = await asyncio.wait_for(ch.get(), timeout=timeout_seconds)
+            job = await asyncio.wait_for(channel.get(), timeout=timeout_seconds)
             return job
         except asyncio.TimeoutError:
-            logger.debug(
-                f"Timeout waiting for job to be added after {timeout_seconds} seconds"
-            )
+            logger.debug(f"Timed out waiting for job added ({timeout_seconds}s)")
             return None
         except Exception as e:
             logger.error(f"Error waiting for job added: {e}")
             return None
         finally:
             # Unsubscribe from broadcaster
-            await self.job_insert_broadcaster.unsubscribe(ch)
+            await self.job_insert_broadcaster.unsubscribe(channel)
 
     def wait_for_job_finished(
         self, job_rid: UUID, timeout_seconds: float = 30.0
@@ -150,6 +136,11 @@ class QueuerJobMixin:
         """
         Wait for a job to finish and return the job.
         Uses SmallRunner for shared state access.
+
+        :param job_rid: The RID of the job to wait for
+        :param timeout_seconds: Maximum time to wait for job completion
+        :returns: The completed job, or None if not found or timeout
+        :raises Exception: If broadcaster is not available
         """
         # Add buffer to runner timeout to allow async method final check to complete
         runner_timeout = timeout_seconds + 1.0
@@ -164,80 +155,53 @@ class QueuerJobMixin:
     async def _wait_with_listener(
         self, job_rid: UUID, timeout_seconds: float
     ) -> Optional["Job"]:
-        """Wait for job completion using pure database notifications."""
+        """
+        Wait for job completion using pure database notifications.
 
-        # Check if job is already completed in archive
-        def check_archive():
-            with self.db_job.db.instance.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    "SELECT * FROM job_archive WHERE rid = %s ORDER BY updated_at DESC LIMIT 1",
-                    (job_rid,),
-                )
-                row = cur.fetchone()
-                if row:
-                    from model.job import Job
-
-                    return Job.from_row(row)
-                return None
-
-        # First check for immediate completion
-        completed_job = check_archive()
-        if completed_job:
-            return completed_job
-
-        # Job not in archive yet, wait for notification
+        :param job_rid: The RID of the job to wait for
+        :param timeout_seconds: Maximum time to wait for job completion
+        :returns: The completed job, or None if not found or timeout
+        :raises Exception: If broadcaster is not available
+        """
         if (
             not hasattr(self, "job_delete_broadcaster")
             or self.job_delete_broadcaster is None
         ):
-            return None
+            raise Exception("Job delete broadcaster not available")
 
-        channel = None
         try:
-            # Subscribe to job delete notifications (job completion)
-            channel = await self.job_delete_broadcaster.subscribe()
-
-            # Check archive again in case job completed during subscription
-            completed_job = check_archive()
-            if completed_job:
-                return completed_job
-
-            # Wait for the specific job notification
-            while True:
-                completed_job = await asyncio.wait_for(
-                    channel.get(), timeout=timeout_seconds
-                )
-
-                # Check if this is the job we're waiting for
-                if completed_job.rid == job_rid:
-                    return completed_job
-                # Continue waiting for our specific job if it's a different one
-
-        except asyncio.TimeoutError:
-            # Final check before giving up
-            return check_archive()
+            job_ended: Job = self.get_job_ended(job_rid)
+            if job_ended:
+                return job_ended
         except Exception:
-            return None
+            pass
+
+        channel: BroadcasterQueue = await self.job_delete_broadcaster.subscribe()
+        try:
+            while True:
+                job = await asyncio.wait_for(channel.get(), timeout=timeout_seconds)
+                if job.rid == job_rid:
+                    return job
+        except asyncio.TimeoutError:
+            logger.debug(f"Timed out waiting for job ended ({timeout_seconds}s)")
+            try:
+                job_ended: Job = self.get_job_ended(job_rid)
+                if job_ended:
+                    return job_ended
+            except Exception:
+                raise QueuerError("waiting for job ended timed out", None)
+        except Exception as e:
+            raise QueuerError("waiting for job added failed", e)
         finally:
-            # Cleanup subscription
-            if channel:
-                try:
-                    await self.job_delete_broadcaster.unsubscribe(channel)
-                except Exception:
-                    pass
+            await self.job_insert_broadcaster.unsubscribe(channel)
 
     def cancel_job(self, job_rid: UUID) -> "Job":
         """
-        Cancel a job with the given job RID.
+         Cancel a job with the given job RID.
 
-        Args:
-            job_rid: The RID of the job to cancel
-
-        Returns:
-            The cancelled job
-
-        Raises:
-            Exception: If the job is not found or already cancelled
+        :param job_rid: The RID of the job to cancel
+        :returns: The cancelled job
+        :raises Exception: If the job is not found or already cancelled
         """
         job = self.db_job.select_job(job_rid)
         if not job:
@@ -246,16 +210,13 @@ class QueuerJobMixin:
         self._cancel_job(job)
         return job
 
-    def cancel_all_jobs_by_worker(self, worker_rid: UUID, entries: int = 100) -> None:
+    def cancel_all_jobs_by_worker(self, worker_rid: UUID, entries: int = 100):
         """
         Cancel all jobs assigned to a specific worker by its RID.
 
-        Args:
-            worker_rid: The RID of the worker
-            entries: Maximum number of jobs to cancel
-
-        Raises:
-            Exception: If something goes wrong during the process
+        :param worker_rid: The RID of the worker
+        :param entries: Maximum number of jobs to cancel
+        :raises Exception: If something goes wrong during the process
         """
         jobs = self.db_job.select_all_jobs_by_worker_rid(worker_rid, 0, entries)
         for job in jobs:
@@ -265,14 +226,9 @@ class QueuerJobMixin:
         """
         Readd a job from the archive back to the queue.
 
-        Args:
-            job_rid: The RID of the job to readd
-
-        Returns:
-            The new job created from the archived job
-
-        Raises:
-            Exception: If the job is not found in archive
+        :param job_rid: The RID of the job to readd
+        :returns: The new job created from the archived job
+        :raises Exception: If the job is not found in archive
         """
         job = self.db_job.select_job_from_archive(job_rid)
         if not job:
@@ -287,14 +243,9 @@ class QueuerJobMixin:
         """
         Retrieve a job by its RID.
 
-        Args:
-            job_rid: The RID of the job
-
-        Returns:
-            The job
-
-        Raises:
-            Exception: If the job is not found
+        :param job_rid: The RID of the job
+        :returns: The job
+        :raises Exception: If the job is not found
         """
         job = self.db_job.select_job(job_rid)
         if not job:
@@ -305,12 +256,9 @@ class QueuerJobMixin:
         """
         Retrieve all jobs in the queue.
 
-        Args:
-            last_id: Last job ID for pagination
-            entries: Number of entries to retrieve
-
-        Returns:
-            List of jobs
+        :param last_id: Last job ID for pagination
+        :param entries: Number of entries to retrieve
+        :returns: List of jobs
         """
         return self.db_job.select_all_jobs(last_id, entries)
 
@@ -318,14 +266,9 @@ class QueuerJobMixin:
         """
         Retrieve a job that has ended (succeeded, cancelled or failed) by its RID.
 
-        Args:
-            job_rid: The RID of the job
-
-        Returns:
-            The ended job
-
-        Raises:
-            Exception: If the job is not found
+        :param job_rid: The RID of the job
+        :returns: The ended job
+        :raises Exception: If the job is not found
         """
         job = self.db_job.select_job_from_archive(job_rid)
         if not job:
@@ -336,12 +279,9 @@ class QueuerJobMixin:
         """
         Retrieve all jobs that have ended (succeeded, cancelled or failed).
 
-        Args:
-            last_id: Last job ID for pagination
-            entries: Number of entries to retrieve
-
-        Returns:
-            List of ended jobs
+        :param last_id: Last job ID for pagination
+        :param entries: Number of entries to retrieve
+        :returns: List of ended jobs
         """
         return self.db_job.select_all_jobs_from_archive(last_id, entries)
 
@@ -351,13 +291,10 @@ class QueuerJobMixin:
         """
         Retrieve jobs assigned to a specific worker by its RID.
 
-        Args:
-            worker_rid: The RID of the worker
-            last_id: Last job ID for pagination
-            entries: Number of entries to retrieve
-
-        Returns:
-            List of jobs assigned to the worker
+        :param worker_rid: The RID of the worker
+        :param last_id: Last job ID for pagination
+        :param entries: Number of entries to retrieve
+        :returns: List of jobs assigned to the worker
         """
         return self.db_job.select_all_jobs_by_worker_rid(worker_rid, last_id, entries)
 
@@ -367,11 +304,8 @@ class QueuerJobMixin:
         """
         Merge the worker options with optional job options.
 
-        Args:
-            options: Job-specific options (can be None)
-
-        Returns:
-            Merged options
+        :param options: Job-specific options (can be None)
+        :returns: Merged options
         """
         worker_options = self.worker.options if self.worker else None
 
@@ -388,13 +322,11 @@ class QueuerJobMixin:
         """
         Add a job to the queue with all necessary parameters.
 
-        Args:
-            task: The task to execute
-            options: Job options
-            *parameters: Task parameters
-
-        Returns:
-            The created job
+        :param task: Either a function or a string with the task name
+        :param options: Job-specific options (can be None)
+        :param parameters: Parameters to pass to the task
+        :returns: The created job
+        :raises Exception: If something goes wrong
         """
         try:
             # Create new job with proper parameter order
@@ -411,7 +343,7 @@ class QueuerJobMixin:
         except Exception as e:
             raise Exception(f"Creating or inserting job: {str(e)}")
 
-    def _run_job_initial(self) -> None:
+    def _run_job_initial(self):
         """
         Called to run the next job in the queue.
         Updates job status to running with worker.
@@ -468,13 +400,9 @@ class QueuerJobMixin:
         """
         Execute the job and return the results or an error.
 
-        Args:
-            job: The job to execute
-
-        Returns:
-            Tuple of (results, cancelled, error)
+        :param job: The job to execute
+        :returns: A tuple containing the results, a cancellation flag, and an error if any
         """
-        # Get the task function
         task_obj = self.tasks.get(job.task_name)
         if not task_obj:
             return None, False, Exception(f"Task not found: {job.task_name}")
@@ -484,58 +412,42 @@ class QueuerJobMixin:
         if not callable(task):
             return None, False, Exception(f"Task is not callable: {job.task_name}")
 
-        # Use ProcessRunner for better cancellation control
         try:
-            logger.info(
-                f"Starting ProcessRunner for task {job.task_name} with parameters {job.parameters}"
-            )
-
-            # Use Runner for all job execution
             parameters = getattr(job, "parameters", [])
             runner = Runner(task, tuple(parameters), {})
 
             logger.info(f"Created runner for job {job.rid}")
 
-            # Store the runner for potential cancellation
             if not hasattr(self, "active_runners"):
                 self.active_runners: Dict[UUID, Runner] = {}
             self.active_runners[job.rid] = runner
 
             try:
-                # Start the runner
                 runner.go()
                 results = runner.get_results(timeout=300)
-
-                logger.info(
-                    f"Runner task {job.task_name} completed with results: {results}"
-                )
+                logger.debug(f"Runner task {job.task_name} completed: {results}")
                 return results, False, None
 
             except asyncio.CancelledError:
-                # Handle cancellation
                 if runner:
                     runner.cancel()
                 return None, True, None
             except Exception as e:
-                logger.error(
-                    f"Process runner task {job.task_name} failed with error: {e}"
-                )
+                logger.error(f"Process runner task {job.task_name} failed: {e}")
                 return None, False, e
             finally:
-                # Clean up runner reference
                 self.active_runners.pop(job.rid, None)
 
         except Exception as e:
             logger.error(f"Error setting up runner for task {job.task_name}: {e}")
             return None, False, e
 
-    async def _retry_job(self, job: "Job", job_error: Exception) -> None:
+    async def _retry_job(self, job: "Job", job_error: Exception):
         """
         Retry the job with the given job error.
 
-        Args:
-            job: The job to retry
-            job_error: The error that occurred
+        :param job: The job to retry
+        :param job_error: The error that occurred during the job execution
         """
         if (
             not job.options
@@ -545,7 +457,6 @@ class QueuerJobMixin:
             await self._fail_job(job, job_error)
             return
 
-        # Create a function that will retry the job
         async def retry_function():
             logger.debug(f"Trying/retrying job: {job.rid}")
             results, cancelled, err = await self._wait_for_job(job)
@@ -563,16 +474,14 @@ class QueuerJobMixin:
                 Exception(f"Retrying job failed: {error}, original error: {job_error}"),
             )
         else:
-            # If retry succeeded, we need to get the results
             results, _, _ = await self._wait_for_job(job)
             await self._succeed_job(job, results)
 
-    async def _run_job(self, job: "Job") -> None:
+    async def _run_job(self, job: "Job"):
         """
         Run the job.
 
-        Args:
-            job: The job to run
+        :param job: The job to run
         """
         logger.info(f"Running job: {job.rid}")
 
@@ -585,10 +494,12 @@ class QueuerJobMixin:
         else:
             await self._succeed_job(job, results)
 
-    def _run_job_sync(self, job: "Job") -> None:
+    def _run_job_sync(self, job: "Job"):
         """
         Synchronous wrapper for _run_job that can be called by the Scheduler.
         Mirrors the Go pattern where scheduler calls the function directly.
+
+        :param job: The job to run
         """
         try:
             # Create a Runner process for the async job
@@ -599,12 +510,11 @@ class QueuerJobMixin:
         except Exception as e:
             logger.error(f"Error executing scheduled job {job.rid}: {e}")
 
-    def _cancel_job(self, job: "Job") -> None:
+    def _cancel_job(self, job: "Job"):
         """
         Cancel a job.
 
-        Args:
-            job: The job to cancel
+        :param job: The job to cancel
         """
         if job.status in [JobStatus.RUNNING, JobStatus.SCHEDULED, JobStatus.QUEUED]:
             # Cancel the running process if it exists
@@ -625,41 +535,37 @@ class QueuerJobMixin:
             except Exception as e:
                 logger.error(f"Error updating job status to cancelled: {e}")
 
-    async def _succeed_job(self, job: "Job", results: List[Any]) -> None:
+    async def _succeed_job(self, job: "Job", results: List[Any]):
         """
         Update the job status to succeeded and run the next job if available.
 
-        Args:
-            job: The job that succeeded
-            results: The results from the job
+        :param job: The job that succeeded
+        :param results: The results from the job
         """
         job.status = JobStatus.SUCCEEDED
         job.results = results
         await self._end_job(job)
 
-    async def _fail_job(self, job: "Job", job_error: Exception) -> None:
+    async def _fail_job(self, job: "Job", job_error: Exception):
         """
         Update the job status to failed.
 
-        Args:
-            job: The job that failed
-            job_error: The error that occurred
+        :param job: The job that failed
+        :param job_error: The error that occurred
         """
         job.status = JobStatus.FAILED
         job.error = str(job_error)
         await self._end_job(job)
 
-    async def _end_job(self, job: "Job") -> None:
+    async def _end_job(self, job: "Job"):
         """
         End a job and potentially schedule it again if it's a recurring job.
 
-        Args:
-            job: The job to end
+        :param job: The job to end
         """
         if not self.worker or job.worker_id != self.worker.id:
             return
 
-        # Check if database connection is available
         if not self.db_job or not self.db_job.db or not self.db_job.db.instance:
             logger.error(f"Database connection unavailable for job {job.rid}")
             return
@@ -668,7 +574,6 @@ class QueuerJobMixin:
             ended_job = self.db_job.update_job_final(job)
             logger.debug(f"Job ended: {ended_job.status} - {ended_job.rid}")
 
-            # Handle scheduled jobs (recurring jobs)
             if (
                 ended_job.options
                 and ended_job.options.schedule
@@ -702,9 +607,8 @@ class QueuerJobMixin:
         except Exception as e:
             logger.error(f"Error updating finished job: {e}")
 
-        # Try to run the next job in the queue
+        # Try to run the next job in the queue, so if one job is finished another can directly start
         try:
-            # Only run next job if we have valid database connection
             if self.db_job and self.db_job.db and self.db_job.db.instance:
                 self._run_job_initial()
         except Exception as e:

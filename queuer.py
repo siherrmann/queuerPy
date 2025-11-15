@@ -28,6 +28,7 @@ from core.runner import Runner, SmallRunner
 from core.runner import Runner, go_func
 
 # Local imports - model classes
+from helper.logging import get_logger
 from model.job import Job, JobStatus
 from model.task import Task
 from model.worker import Worker, new_worker, new_worker_with_options, WorkerStatus
@@ -41,6 +42,8 @@ from queuer_job import QueuerJobMixin
 from queuer_task import QueuerTaskMixin
 from queuer_next_interval import QueuerNextIntervalMixin
 from queuer_listener import QueuerListenerMixin
+
+logger = get_logger(__name__)
 
 
 def new_queuer(name: str, max_concurrency: int, *options: OnError) -> "Queuer":
@@ -112,9 +115,6 @@ class Queuer(
         self.name: str = name
         self.max_concurrency: int = max_concurrency
 
-        # Logger
-        self.log: logging.Logger = logging.getLogger(f"queuer.{name}")
-
         # Context management - will be set in start()
         self._running: bool = False
         self._stopped: threading.Event = threading.Event()
@@ -127,7 +127,7 @@ class Queuer(
             self.db_config: DatabaseConfiguration = DatabaseConfiguration.from_env()
 
         # Database connection
-        self.database: Database = new_database("queuer", self.db_config, self.log)
+        self.database: Database = new_database("queuer", self.db_config, logger)
         self.DB = self.database.instance
 
         # Database handlers
@@ -155,7 +155,7 @@ class Queuer(
         self.worker: Worker = self.db_worker.insert_worker(new_worker_obj)
         self.worker_mutex: threading.RLock = threading.RLock()
 
-        self.log.info(
+        logger.info(
             f"Queuer with worker created: {new_worker_obj.name} (RID: {self.worker.rid})"
         )
 
@@ -187,7 +187,7 @@ class Queuer(
         self._heartbeat_ticker: Optional[Any] = None
         self._poll_job_ticker: Optional[Any] = None
 
-    def start(self) -> None:
+    def start(self):
         """Start the queuer."""
         if self._running:
             raise RuntimeError("Queuer is already running")
@@ -202,13 +202,13 @@ class Queuer(
         # Set up database listeners
         try:
             self.job_db_listener = new_queuer_db_listener(self.db_config, "job")
-            self.log.info("Added listener for channel: job")
+            logger.info("Added listener for channel: job")
             self.job_archive_db_listener = new_queuer_db_listener(
                 self.db_config, "job_archive"
             )
-            self.log.info("Added listener for channel: job_archive")
+            logger.info("Added listener for channel: job_archive")
         except Exception as e:
-            self.log.error(f"Error creating database listeners: {e}")
+            logger.error(f"Error creating database listeners: {e}")
             raise RuntimeError(f"Error creating database listeners: {e}")
 
         # Broadcasters for job updates and deletes
@@ -223,7 +223,7 @@ class Queuer(
             self.job_delete_broadcaster = new_broadcaster("job.DELETE")
             self.job_delete_listener = Listener[Job](self.job_delete_broadcaster)
         except Exception as e:
-            self.log.error(f"Error creating job broadcasters: {e}")
+            logger.error(f"Error creating job broadcasters: {e}")
             raise RuntimeError(f"Error creating job broadcasters: {e}")
 
         # Update worker status to running
@@ -232,7 +232,7 @@ class Queuer(
                 self.worker.status = WorkerStatus.RUNNING
                 self.worker = self.db_worker.update_worker(self.worker)
         except Exception as e:
-            self.log.error(f"Error updating worker status to running: {e}")
+            logger.error(f"Error updating worker status to running: {e}")
             raise RuntimeError(f"Error updating worker status to running: {e}")
 
         # Start background tasks
@@ -240,27 +240,27 @@ class Queuer(
         self._start_heartbeat_ticker()
         self._start_poll_job_ticker()  # Backup polling every 5 minutes
 
-        self.log.info("Queuer started")
+        logger.info("Queuer started")
 
-    def stop(self) -> None:
+    def stop(self):
         """Stop the queuer."""
-        if not self._running:
-            return
+        # Store whether we were running to decide if we need to close connections
+        was_running = getattr(self, "_running", False)
 
         # Stop tickers first to prevent new work from being queued
         if self._heartbeat_ticker:
             try:
                 self._heartbeat_ticker.stop()
-                self.log.info("Stopped heartbeat ticker")
+                logger.info("Stopped heartbeat ticker")
             except Exception as e:
-                self.log.warning(f"Error stopping heartbeat ticker: {e}")
+                logger.warning(f"Error stopping heartbeat ticker: {e}")
 
         if self._poll_job_ticker:
             try:
                 self._poll_job_ticker.stop()
-                self.log.info("Stopped poll job ticker")
+                logger.info("Stopped poll job ticker")
             except Exception as e:
-                self.log.warning(f"Error stopping poll job ticker: {e}")
+                logger.warning(f"Error stopping poll job ticker: {e}")
 
         # Close database listeners
         if self.job_db_listener:
@@ -271,7 +271,7 @@ class Queuer(
             except Exception as e:
                 # Only log if it's not already closed
                 if "closed" not in str(e).lower():
-                    self.log.warning(f"Error stopping job listener: {e}")
+                    logger.warning(f"Error stopping job listener: {e}")
 
         # Wait for database listener runners to complete
         if self.job_db_listener_runner:
@@ -279,7 +279,7 @@ class Queuer(
                 self.job_db_listener_runner.get_results(timeout=2.0)
                 self.job_db_listener_runner = None
             except Exception as e:
-                self.log.warning(f"Error waiting for job listener runner: {e}")
+                logger.warning(f"Error waiting for job listener runner: {e}")
 
         if self.job_archive_db_listener:
             try:
@@ -287,7 +287,7 @@ class Queuer(
                 task.get_results(timeout=3.0)  # Wait up to 3 seconds total
             except Exception as e:
                 if "closed" not in str(e).lower():
-                    self.log.warning(f"Error stopping job archive listener: {e}")
+                    logger.warning(f"Error stopping job archive listener: {e}")
 
         # Wait for database archive listener runner to complete
         if self.job_archive_db_listener_runner:
@@ -295,75 +295,160 @@ class Queuer(
                 self.job_archive_db_listener_runner.get_results(timeout=2.0)
                 self.job_archive_db_listener_runner = None
             except Exception as e:
-                self.log.warning(f"Error waiting for job archive listener runner: {e}")
+                logger.warning(f"Error waiting for job archive listener runner: {e}")
 
-        # Update worker status to stopped
+        # Update worker status to stopped (only if we were running)
         worker_rid = None
-        try:
-            with self.worker_mutex:
-                self.worker.status = WorkerStatus.STOPPED
-                self.worker = self.db_worker.update_worker(self.worker)
-                worker_rid = self.worker.rid
-        except Exception as e:
-            self.log.error(f"Error updating worker status to stopped: {e}")
+        if was_running:
+            try:
+                with self.worker_mutex:
+                    self.worker.status = WorkerStatus.STOPPED
+                    self.worker = self.db_worker.update_worker(self.worker)
+                    worker_rid = self.worker.rid
+            except Exception as e:
+                logger.error(f"Error updating worker status to stopped: {e}")
+        else:
+            # If we were never running, just get the worker_rid for job cancellation
+            worker_rid = self.worker.rid
 
         # Cancel all queued and running jobs
         if worker_rid:
             try:
                 self.cancel_all_jobs_by_worker(worker_rid, 100)
             except Exception as e:
-                self.log.error(f"Error cancelling all jobs by worker: {e}")
+                logger.error(f"Error cancelling all jobs by worker: {e}")
 
         # Cancel the context equivalent - set cancellation event
         if self._cancel_event:
             try:
                 self._cancel_event.set()
             except Exception as e:
-                self.log.warning(f"Error setting cancel event: {e}")
+                logger.warning(f"Error setting cancel event: {e}")
 
         # Signal that we're stopping
         self._running = False
         self._stopped.set()
 
         # Cancel all active runners - similar to Go's job cancellation
+        active_runner_count = len(self.active_runners)
+        if active_runner_count > 0:
+            logger.info(f"Cancelling {active_runner_count} active runners")
+
         for runner_id, runner in list(self.active_runners.items()):
             try:
                 runner.cancel()
                 if runner_id in self.active_runners:
                     del self.active_runners[runner_id]
-            except Exception as e:
-                self.log.warning(f"Error cancelling runner {runner_id}: {e}")
+                    logger.debug(f"Removed runner {runner_id} from active_runners")
 
-        # Close database connection
-        if hasattr(self, "DB") and self.DB:
+            except Exception as e:
+                logger.warning(f"Error cancelling runner {runner_id}: {e}")
+
+        # Final check
+        remaining_runners = len(self.active_runners)
+        if remaining_runners > 0:
+            logger.warning(f"{remaining_runners} runners could not be cleaned up")
+        else:
+            logger.debug("All active runners cleaned up successfully")
+
+        # Cleanup broadcasters and listeners
+        try:
+            broadcaster_count = 0
+            if self.job_insert_broadcaster:
+                listener_count = len(self.job_insert_broadcaster.listeners)
+                if listener_count > 0:
+                    logger.debug(
+                        f"Clearing {listener_count} listeners from job_insert_broadcaster"
+                    )
+                    self.job_insert_broadcaster.listeners.clear()
+                broadcaster_count += 1
+
+            if self.job_update_broadcaster:
+                listener_count = len(self.job_update_broadcaster.listeners)
+                if listener_count > 0:
+                    logger.debug(
+                        f"Clearing {listener_count} listeners from job_update_broadcaster"
+                    )
+                    self.job_update_broadcaster.listeners.clear()
+                broadcaster_count += 1
+
+            if self.job_delete_broadcaster:
+                listener_count = len(self.job_delete_broadcaster.listeners)
+                if listener_count > 0:
+                    logger.debug(
+                        f"Clearing {listener_count} listeners from job_delete_broadcaster"
+                    )
+                    self.job_delete_broadcaster.listeners.clear()
+                broadcaster_count += 1
+
+            if broadcaster_count > 0:
+                logger.debug(f"Cleaned up {broadcaster_count} broadcasters")
+
+            # Clear broadcaster references
+            self.job_insert_broadcaster = None
+            self.job_update_broadcaster = None
+            self.job_delete_broadcaster = None
+
+        except Exception as e:
+            logger.warning(f"Error during broadcaster cleanup: {e}")
+
+        # Cleanup AsyncIO resources
+        try:
+            # Cancel any pending async tasks
             try:
-                self.log.info("Closing database connection")
-                if hasattr(self.DB, "close"):
-                    self.DB.close()
-            except Exception as e:
-                self.log.error(f"Error closing database connection: {e}")
+                loop = asyncio.get_running_loop()
+                pending_tasks = [
+                    task for task in asyncio.all_tasks(loop) if not task.done()
+                ]
+                if pending_tasks:
+                    logger.debug(f"Cancelling {len(pending_tasks)} pending async tasks")
+                    for task in pending_tasks:
+                        task.cancel()
+                    # Don't wait for cancellation to avoid hanging
+            except RuntimeError:
+                # No running event loop, which is fine
+                pass
 
-        self.log.info(f"Queuer '{self.worker.name}' stopped")
+            # Clear the cancel event
+            self._cancel_event = None
+
+        except Exception as e:
+            logger.warning(f"Error during AsyncIO cleanup: {e}")
+
+            # Only close main database connection if we were running
+            # This allows reusing the queuer after stop() if it was never started
+            if hasattr(self, "database") and self.database:
+                try:
+                    logger.info(
+                        f"Closing main database connection for queuer '{self.name}'"
+                    )
+                    self.database.close()
+                except Exception as e:
+                    logger.error(f"Error closing main database connection: {e}")
+
+        logger.info(f"Queuer '{self.worker.name}' stopped")
 
     async def _handle_job_notification(self, notification):
-        """Handle job database notifications."""
+        """
+        Handle job database notifications.
+
+        :param notification: The notification payload as a string
+        """
         try:
-            self.log.info(
-                f"[{self.name}] Received notification: {notification[:100]}..."
-            )
+            logger.info(f"[{self.name}] Received notification: {notification[:100]}...")
             job_data = json.loads(notification)
             status = job_data.get("status")
             job_rid = job_data.get("rid")
 
-            self.log.debug(
+            logger.debug(
                 f"[{self.name}] Job notification details - Status: {status}, RID: {job_rid}"
             )
-            self.log.debug(f"[{self.name}] Full job data: {job_data}")
+            logger.debug(f"[{self.name}] Full job data: {job_data}")
 
-            if status in ["QUEUED", "SCHEDULED"]:
+            if status in [JobStatus.QUEUED, JobStatus.SCHEDULED]:
                 if self._running:
                     job_rid_uuid = UUID(job_data.get("rid"))
-                    self.log.info(
+                    logger.info(
                         f"[{self.name}] Processing {status} job: {job_rid_uuid}"
                     )
                     go_func(self._run_job_initial, use_mp=False)
@@ -373,24 +458,17 @@ class Queuer(
                         hasattr(self, "job_insert_broadcaster")
                         and self.job_insert_broadcaster
                     ):
+                        logger.info(
+                            f"[{self.name}] Broadcasting job insertion for job: {job_rid_uuid}"
+                        )
                         job = Job.from_dict(job_data)
-                        self.log.debug(
-                            f"[{self.name}] Broadcasting job insertion for {job.rid}"
-                        )
                         await self.job_insert_broadcaster.broadcast(job)
-                        self.log.info(
-                            f"[{self.name}] Job insertion notification sent for {job.rid}"
-                        )
-                    else:
-                        self.log.warning(
-                            f"[{self.name}] No job_insert_broadcaster available for notification"
-                        )
                 else:
-                    self.log.warning(
+                    logger.warning(
                         f"[{self.name}] Queuer not running, ignoring {status} job: {job_rid}"
                     )
             else:
-                self.log.info(f"Job update detected with status: {status}")
+                logger.info(f"Job update detected with status: {status}")
                 if (
                     hasattr(self, "job_update_broadcaster")
                     and self.job_update_broadcaster
@@ -399,67 +477,65 @@ class Queuer(
                     await self.job_update_broadcaster.broadcast(job)
 
         except Exception as e:
-            self.log.error(f"Error handling job notification: {e}")
+            logger.error(f"Error handling job notification: {e}")
             import traceback
 
             traceback.print_exc()
 
     async def _handle_job_archive_notification(self, notification):
-        """Handle job archive database notifications."""
+        """
+        Handle job archive database notifications.
+
+        :param notification: The notification payload as a string
+        """
         try:
             job_data = json.loads(notification)
             job = Job.from_dict(job_data)
 
             if job.status == "CANCELLED":
                 if job.rid in self.active_runners:
-                    self.log.info(f"Canceling running job: {job.rid}")
+                    logger.info(f"Canceling running job: {job.rid}")
                     runner: Runner = self.active_runners[job.rid]
                     runner.cancel()
                     del self.active_runners[job.rid]
             else:
-                self.log.info(f"Job completed with status: {job.status}")
+                logger.info(f"Job {job.rid} completed with status: {job.status}")
                 if (
                     hasattr(self, "job_delete_broadcaster")
                     and self.job_delete_broadcaster
                 ):
                     await self.job_delete_broadcaster.broadcast(job)
-                    self.log.info(f"Broadcasted job deletion completion for {job.rid}")
+                    logger.info(f"Broadcasted job deletion completion for {job.rid}")
 
         except Exception as e:
-            self.log.error(f"Error handling job archive notification: {e}")
+            logger.error(f"Error handling job archive notification: {e}")
             traceback.print_exc()
 
-    def _start_listeners(self) -> None:
+    def _start_listeners(self):
         """Start database listeners."""
         # Start job listener
         if self.job_db_listener:
             try:
-                self.log.debug(
-                    f"[{self.name}] Starting job database listener for 'job' channel"
-                )
+                logger.debug("Starting job listeners")
                 self.job_db_listener_runner = go_func(
                     self._start_job_listener,
                     False,
                     self._handle_job_notification,
                 )
-                self.log.info(f"[{self.name}] Started job database listener")
             except Exception as e:
-                self.log.error(f"Error starting job listener: {e}")
+                logger.error(f"Error starting job listener: {e}")
 
         # Start job archive listener
         if self.job_archive_db_listener:
             try:
-                self.log.debug(
-                    f"[{self.name}] Starting job archive database listener for 'job_archive' channel"
-                )
+                logger.debug("Starting job archive listeners")
                 self.job_archive_db_listener_runner = go_func(
                     self._start_job_archive_listener,
                     False,
                     self._handle_job_archive_notification,
                 )
-                self.log.info(f"[{self.name}] Started job archive database listener")
             except Exception as e:
-                self.log.error(f"Error starting job archive listener: {e}")
+                logger.error(f"Error starting job archive listener: {e}")
 
     def _heartbeat_func(self):
         """Send periodic heartbeats - only updates database, not queuer state."""
@@ -470,39 +546,44 @@ class Queuer(
                 # Update timestamp and save to database
                 current_worker.updated_at = datetime.now()
                 self.db_worker.update_worker(current_worker)
-                self.log.debug(
+                logger.debug(
                     f"Updated worker heartbeat timestamp: {current_worker.updated_at}"
                 )
         except Exception as e:
-            self.log.error(f"Heartbeat error: {e}")
+            logger.error(f"Heartbeat error: {e}")
 
-    def _start_heartbeat_ticker(self) -> None:
+    def _start_heartbeat_ticker(self):
         """Start heartbeat ticker using threading."""
         from core.ticker import Ticker
 
         self._heartbeat_ticker = Ticker(
             timedelta(seconds=30), self._heartbeat_func, use_mp=False
         )
-        self.log.info("Starting heartbeat ticker...")
+        logger.info("Starting heartbeat ticker...")
         self._heartbeat_ticker.go()
 
     def _poll_jobs_func(self):
         """Poll for jobs as backup to notification system."""
         try:
-            self.log.debug("Running backup job polling")
+            logger.debug("Running backup job polling")
             self._run_job_initial()
         except Exception as e:
-            self.log.warning(f"Backup job polling error: {e}")
+            logger.warning(f"Backup job polling error: {e}")
 
     async def _start_job_listener(self, handle_job_notification):
-        """Start job database listener."""
+        """
+        Start job database listener.
+
+        :param handle_job_notification: The callback to handle job notifications
+        """
         await self.job_db_listener.listen(handle_job_notification)
 
     async def _start_job_archive_listener(self, handle_job_archive_notification):
-        """Start job archive database listener."""
+        """
+        Start job archive database listener."""
         await self.job_archive_db_listener.listen(handle_job_archive_notification)
 
-    def _start_poll_job_ticker(self) -> None:
+    def _start_poll_job_ticker(self):
         """
         Start job polling ticker as backup mechanism.
         This provides a safety net in case notification-based processing fails.
@@ -512,12 +593,12 @@ class Queuer(
         self._poll_job_ticker = Ticker(
             self.job_poll_interval, self._poll_jobs_func, use_mp=False
         )
-        self.log.info(
+        logger.info(
             f"Starting backup job polling ticker (interval: {self.job_poll_interval})..."
         )
         self._poll_job_ticker.go()
 
-    async def _async_run_job_initial(self) -> None:
+    async def _async_run_job_initial(self):
         """
         Async wrapper for _run_job_initial to avoid database transaction conflicts.
         This ensures job processing runs in a separate context from the notification handler.
@@ -531,4 +612,4 @@ class Queuer(
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._run_job_initial)
         except Exception as e:
-            self.log.error(f"Error in async job processing: {e}")
+            logger.error(f"Error in async job processing: {e}")

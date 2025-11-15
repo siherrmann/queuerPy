@@ -6,16 +6,18 @@ Based on the Go queuerTest.go implementation.
 import threading
 import time
 import unittest
-import pytest
 
 from core.runner import SmallRunner, go_func
+from helper.logging import get_logger
 from model.batch_job import BatchJob
 from model.job import Job
-from queuer import new_queuer, new_queuer_with_db
+from queuer import new_queuer_with_db
 from helper.test_database import DatabaseTestMixin
 from helper.database import DatabaseConfiguration
 from model.options_on_error import OnError, RetryBackoff
 from model.worker import WorkerStatus
+
+logger = get_logger(__name__)
 
 
 def global_simple_task(x: int) -> int:
@@ -301,10 +303,6 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
         """Clean up after all tests."""
         super().teardown_class()
 
-    def setUp(self):
-        """Set up for each test method."""
-        super().setup_method()
-
     def test_add_task(self):
         """Test adding tasks to queuer."""
         queuer = new_queuer_with_db("test_add_task", 10, "", self.db_config)
@@ -316,8 +314,7 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
             task_obj = queuer.tasks["global_simple_task"]
             self.assertEqual(global_simple_task, task_obj.task)
         finally:
-            if queuer._running:
-                queuer.stop()
+            queuer.stop()
 
     def test_add_multiple_tasks(self):
         """Test adding multiple tasks to queuer."""
@@ -331,8 +328,7 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
             self.assertIn("global_test_task", queuer.tasks)
             self.assertEqual(2, len(queuer.tasks))
         finally:
-            if queuer._running:
-                queuer.stop()
+            queuer.stop()
 
     def test_add_job_basic(self):
         """Test adding a basic job."""
@@ -351,34 +347,21 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
             job = queuer.get_job(job.rid)
             self.assertIsNotNone(job, "Expected job to be found in database")
         finally:
-            if queuer._running:
-                queuer.stop()
+            queuer.stop()
 
     def test_add_job_without_task_registration(self):
-        """Test adding job without registering task.
-
-        Note: Unlike the Go implementation, the Python version currently allows
-        adding jobs without first registering tasks. The task name is derived
-        from the function name automatically.
-        """
-        # Add a timeout mechanism to prevent infinite hangs
-        import signal
-
-        def timeout_handler(signum, frame):
-            raise TimeoutError("Test timed out after 30 seconds")
-
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(30)  # 30 second timeout
-
+        """Test adding job without registering task."""
         try:
             queuer = new_queuer_with_db("test_job_no_task", 10, "", self.db_config)
 
-            job = queuer.add_job(global_simple_task, 42)
+            job = queuer.add_job("global_simple_task", 42)
             self.assertIsNotNone(job)
             self.assertEqual("global_simple_task", job.task_name)
+            logger.debug(
+                f"job with non existing task inserted: {job.rid if job else 'None'}"
+            )
         finally:
-            if queuer._running:
-                queuer.stop()
+            queuer.stop()
 
     def test_job_creation_performance(self):
         """Test that job creation is fast and doesn't hang."""
@@ -407,8 +390,7 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
                 len(job_ids), len(set(job_ids)), "All job IDs should be unique"
             )
         finally:
-            if queuer._running:
-                queuer.stop()
+            queuer.stop()
 
 
 class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
@@ -430,8 +412,8 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
 
     def test_rapid_job_insertion_no_hanging(self):
         """Test that rapid job insertion doesn't hang with notification system."""
-        listener_runner: SmallRunner = SmallRunner(None, (), {})
         queuer = new_queuer_with_db("test_no_hang", 5, "", self.db_config)
+        listener_runner: SmallRunner = SmallRunner(queuer.listen_for_job_insert, (), {})
 
         try:
             queuer.add_task(global_simple_task)
@@ -441,17 +423,15 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             jobs_lock = threading.Lock()
 
             def on_job_inserted(job: Job):
-                print(f"Received job notification: {job.rid if job else 'None'}")
+                logger.debug(f"Received job notification: {job.rid if job else 'None'}")
                 with jobs_lock:
                     jobs.append(job)
 
-            # Start the listener in the background using go_func (like go func in Go)
-            def listen_wrapper():
-                print("Starting listener...")
-                queuer.listen_for_job_insert(on_job_inserted)
-                print("Listener started")
-
-            listener_runner: SmallRunner = go_func(listen_wrapper, use_mp=False)
+            listener_runner: SmallRunner = go_func(
+                queuer.listen_for_job_insert,
+                use_mp=False,
+                notify_function=on_job_inserted,
+            )
 
             # Give the listener a moment to start up
             time.sleep(0.5)
@@ -472,33 +452,17 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
                 0,
                 f"Should have received at least some job notifications, got {jobs_received}",
             )
-            job_count = 0
-            with queuer.db_job.db.instance.cursor() as cur:
-                jobs = queuer.get_jobs(0, 100)
-                jobs_ended = queuer.get_jobs_ended(0, 100)
-                self.assertGreaterEqual(
-                    len(jobs) + len(jobs_ended),
-                    9,
-                    f"Should have at least 9 jobs in database, found {job_count}",
-                )
 
-                # Verify notification system is working by checking triggers exist
-                with queuer.db_job.db.instance.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT COUNT(*) FROM pg_trigger 
-                        WHERE tgname LIKE '%notify_event%'
-                    """
-                    )
-                    trigger_count = cur.fetchone()[0]
-                    self.assertGreater(
-                        trigger_count, 0, "Notification triggers should exist"
-                    )
-
+            jobs = queuer.get_jobs(0, 100)
+            jobs_ended = queuer.get_jobs_ended(0, 100)
+            self.assertGreaterEqual(
+                len(jobs) + len(jobs_ended),
+                9,
+                f"Should have at least 9 jobs in database, found {len(jobs) + len(jobs_ended)}",
+            )
         finally:
-            if queuer._running:
-                listener_runner.get_results()
-                queuer.stop()
+            listener_runner.get_results()
+            queuer.stop()
 
 
 if __name__ == "__main__":

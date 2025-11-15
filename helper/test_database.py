@@ -4,8 +4,15 @@ Simplified testcontainers implementation for reliable testing.
 """
 
 import os
+import threading
+import time
+import psutil
 from testcontainers.postgres import PostgresContainer
 from helper.database import Database, DatabaseConfiguration
+from helper.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class DatabaseTestMixin:
@@ -54,6 +61,11 @@ class DatabaseTestMixin:
         """Set up fresh database connection for each test method."""
         self.db = Database("test_db", self.db_config)
 
+        self._initial_thread_count = threading.active_count()
+        logger.debug(
+            f"🔍 DIAGNOSTIC - Test setup - Active threads: {self._initial_thread_count}"
+        )
+
     def teardown_method(self, method=None):
         """Clean up database connection after each test method."""
         if hasattr(self, "db") and self.db:
@@ -61,8 +73,37 @@ class DatabaseTestMixin:
                 if hasattr(self.db, "instance") and self.db.instance:
                     self.db.instance.rollback()
                 self.db.close()
-            except Exception:
+            except Exception as e:
                 pass
+
+        # Give threads time to clean up
+        time.sleep(0.2)
+
+        try:
+            process = psutil.Process(os.getpid())
+
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            open_files = len(process.open_files())
+            connections = len(process.net_connections())
+
+            logger.debug(
+                f"📊 DIAGNOSTIC - Memory: {memory_mb:.1f} MB, Open files: {open_files}, Connections: {connections}"
+            )
+
+            final_thread_count = threading.active_count()
+            thread_diff = final_thread_count - getattr(self, "_initial_thread_count", 1)
+
+            logger.warning(
+                f"📊 Test cleanup - Thread increase: +{thread_diff} threads ({getattr(self, '_initial_thread_count', 1)} -> {final_thread_count})"
+            )
+
+            for thread in threading.enumerate():
+                if thread != threading.main_thread():
+                    logger.debug(
+                        f"🧵 Active thread: {thread.name} ({type(thread).__name__})"
+                    )
+        except Exception as e:
+            logger.debug("📊 DIAGNOSTIC - monitoring not available")
 
     @classmethod
     def _set_database_env_vars(cls):

@@ -48,8 +48,17 @@ def run_ddl(conn: Connection, sql_statement: str, max_retries: int = 3):
 class SQLLoader:
     """
     SQL file loader that references the same SQL submodule as Go.
-    This class is deprecated - use the sql package directly instead.
+    Matches the loadSql.go implementation exactly.
     """
+
+    # Function lists matching Go implementation
+    JOB_FUNCTIONS = [
+        "update_job_initial",
+        "update_job_final",
+        "update_job_final_encrypted",
+    ]
+    WORKER_FUNCTIONS = ["insert_worker", "update_worker", "delete_worker"]
+    NOTIFY_FUNCTIONS = ["notify_event"]
 
     def __init__(self, sql_base_path: str = None):
         """Initialize with path to SQL files (relative to Python project)."""
@@ -71,53 +80,62 @@ class SQLLoader:
         sql_content = self._load_sql_file(file_path)
         run_ddl(connection, sql_content)
 
-    def load_job_sql(
-        self, connection: Connection, with_table_drop: bool = False
-    ) -> None:
-        """Load job-related SQL functions with deadlock protection."""
+    def _check_functions(self, connection: Connection, sql_functions: list) -> bool:
+        """Check if all SQL functions exist. Matches Go checkFunctions."""
+        for func_name in sql_functions:
+            with connection.cursor() as cur:
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = %s);",
+                    (func_name,),
+                )
+                exists = cur.fetchone()[0]
+
+                if not exists:
+                    return False
+
+        return True
+
+    def load_job_sql(self, connection: Connection, force: bool = False) -> None:
+        """Load job-related SQL functions. Matches Go LoadJobSql."""
+        # Check if functions already exist (unless force=True)
+        if not force:
+            if self._check_functions(connection, self.JOB_FUNCTIONS):
+                return
+
+        # Load the SQL file
         job_sql_path = os.path.join(self.sql_base_path, "job.sql")
-
-        if with_table_drop:
-            ddl_statements = [
-                "DROP FUNCTION IF EXISTS update_job_initial CASCADE;",
-                "DROP FUNCTION IF EXISTS update_job_final CASCADE;",
-                "DROP FUNCTION IF EXISTS update_job_final_encrypted CASCADE;",
-                "DROP FUNCTION IF EXISTS insert_job CASCADE;",
-                "DROP FUNCTION IF EXISTS insert_job_encrypted CASCADE;",
-            ]
-
-            for statement in ddl_statements:
-                run_ddl(connection, statement)
-
         self._execute_sql_file(connection, job_sql_path)
 
-    def load_worker_sql(
-        self, connection: Connection, with_table_drop: bool = False
-    ) -> None:
-        """Load worker-related SQL functions with deadlock protection."""
+        # Verify functions were created
+        if not self._check_functions(connection, self.JOB_FUNCTIONS):
+            raise RuntimeError("Not all required job SQL functions were created")
+
+    def load_worker_sql(self, connection: Connection, force: bool = False) -> None:
+        """Load worker-related SQL functions. Matches Go LoadWorkerSql."""
+        # Check if functions already exist (unless force=True)
+        if not force:
+            if self._check_functions(connection, self.WORKER_FUNCTIONS):
+                return
+
+        # Load the SQL file
         worker_sql_path = os.path.join(self.sql_base_path, "worker.sql")
-
-        if with_table_drop:
-            ddl_statements = [
-                "DROP FUNCTION IF EXISTS insert_worker CASCADE;",
-                "DROP FUNCTION IF EXISTS update_worker CASCADE;",
-            ]
-
-            for statement in ddl_statements:
-                run_ddl(connection, statement)
-
         self._execute_sql_file(connection, worker_sql_path)
 
-    def load_notify_sql(
-        self, connection: Connection, with_table_drop: bool = False
-    ) -> None:
-        """Load notification-related SQL functions with deadlock protection."""
+        # Verify functions were created
+        if not self._check_functions(connection, self.WORKER_FUNCTIONS):
+            raise RuntimeError("Not all required worker SQL functions were created")
+
+    def load_notify_sql(self, connection: Connection, force: bool = False) -> None:
+        """Load notify-related SQL functions. Matches Go LoadNotifySql."""
+        # Check if functions already exist (unless force=True)
+        if not force:
+            if self._check_functions(connection, self.NOTIFY_FUNCTIONS):
+                return
+
+        # Load the SQL file
         notify_sql_path = os.path.join(self.sql_base_path, "notify.sql")
-
-        if with_table_drop:
-            run_ddl(
-                connection,
-                "DROP FUNCTION IF EXISTS notify_event CASCADE;",
-            )
-
         self._execute_sql_file(connection, notify_sql_path)
+
+        # Verify functions were created
+        if not self._check_functions(connection, self.NOTIFY_FUNCTIONS):
+            raise RuntimeError("Not all required notify SQL functions were created")

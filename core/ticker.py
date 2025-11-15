@@ -4,8 +4,8 @@ Simplified to rely on go_func for execution management.
 """
 
 import multiprocessing
+import threading
 import time
-import traceback
 from datetime import timedelta
 from typing import Callable, Optional, Union
 
@@ -47,8 +47,13 @@ class Ticker:
         self._use_mp = use_mp
         self._args = args
         self._kwargs = kwargs
-        self._stop_event = multiprocessing.Event()
         self._runner: Optional[Union[Runner, SmallRunner]] = None
+
+        if use_mp:
+            self._stop_event = multiprocessing.Event()
+        else:
+            self._stop_event = threading.Event()
+
         logger.debug(
             f"Ticker created: task={task.__name__}, interval={self._interval_seconds}s, use_mp={use_mp}, stop_event_created={id(self._stop_event)}"
         )
@@ -79,7 +84,17 @@ class Ticker:
             sleep_duration = self._interval_seconds - elapsed_time
 
             if sleep_duration > 0:
-                time.sleep(sleep_duration)
+                # Sleep in smaller chunks to check stop event more frequently
+                sleep_start = time.monotonic()
+                while (
+                    not self._stop_event.is_set()
+                    and (time.monotonic() - sleep_start) < sleep_duration
+                ):
+                    chunk_sleep = min(
+                        0.1, sleep_duration - (time.monotonic() - sleep_start)
+                    )
+                    if chunk_sleep > 0:
+                        time.sleep(chunk_sleep)
             else:
                 logger.warning(
                     f"Scheduled task took too long ({elapsed_time:.3f}s). "

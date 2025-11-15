@@ -6,6 +6,8 @@ Mirrors Go's queuerTask.go functionality.
 import logging
 from typing import Callable, Union, TYPE_CHECKING
 
+from model.task import new_task, new_task_with_name
+
 if TYPE_CHECKING:
     from model.task import Task
     from model.worker import Worker
@@ -19,24 +21,17 @@ class QueuerTaskMixin:
     Mirrors Go's queuerTask.go functionality.
     """
 
-    def add_task(self, task: Callable) -> 'Task':
+    def add_task(self, task: Callable) -> "Task":
         """
         Add a new task to the queuer.
         Creates a new task with the provided task function, adds it to the worker's available tasks,
         and updates the worker in the database.
         The task name is automatically generated based on the task's function name.
 
-        Args:
-            task: The task function to add
-
-        Returns:
-            The newly created task
-
-        Raises:
-            RuntimeError: If task creation fails or task already exists
+        :param task: The task function to add
+        :return: The newly created task
+        :raises RuntimeError: If task creation fails or task already exists
         """
-        from model.task import new_task
-
         try:
             new_task_obj = new_task(task)
         except Exception as e:
@@ -57,24 +52,17 @@ class QueuerTaskMixin:
         logger.info(f"Task added: {new_task_obj.name}")
         return new_task_obj
 
-    def add_task_with_name(self, task: Callable, name: str) -> 'Task':
+    def add_task_with_name(self, task: Callable, name: str) -> "Task":
         """
         Add a new task with a specific name to the queuer.
         Creates a new task with the provided task function and name, adds it to the worker's available tasks,
         and updates the worker in the database.
 
-        Args:
-            task: The task function to add
-            name: The specific name for the task
-
-        Returns:
-            The newly created task
-
-        Raises:
-            RuntimeError: If task creation fails or task already exists
+        :param task: The task function to add
+        :param name: The specific name for the task
+        :return: The newly created task
+        :raises RuntimeError: If task creation fails or task already exists
         """
-        from model.task import new_task_with_name
-
         try:
             new_task_obj = new_task_with_name(task, name)
         except Exception as e:

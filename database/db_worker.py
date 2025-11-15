@@ -36,7 +36,7 @@ class WorkerDBHandler:
         # Load SQL functions using helper.sql - mirrors Go's LoadWorkerSql
         connection: Connection = self.db.instance
         sql_loader: SQLLoader = SQLLoader()
-        sql_loader.load_worker_sql(connection, with_table_drop)
+        sql_loader.load_worker_sql(connection, force=with_table_drop)
 
         # Handle table drop if requested - mirrors Go behavior
         if with_table_drop:

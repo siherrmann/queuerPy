@@ -57,8 +57,11 @@ def new_task(task: Callable) -> Task:
     Create a new task from function.
     Mirrors Go's NewTask function.
     """
-    task_name = get_task_name_from_function(task)
-    return new_task_with_name(task, task_name)
+    try:
+        task_name = get_task_name_from_function(task)
+        return new_task_with_name(task, task_name)
+    except Exception as e:
+        raise
 
 
 def new_task_with_name(task: Callable, task_name: str) -> Task:

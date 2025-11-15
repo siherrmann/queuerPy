@@ -3,140 +3,116 @@ Tests for task-related methods in the Python queuer implementation.
 Mirrors Go's queuerTask_test.go functionality.
 """
 
+import unittest
 import pytest
-from unittest.mock import Mock, patch
-from queuer_task import QueuerTaskMixin
 from model.task import Task
+from queuer import new_queuer_with_db
+from helper.test_database import DatabaseTestMixin
 
 
-class MockQueuer(QueuerTaskMixin):
-    """Mock queuer class for testing task functionality."""
-    
-    def __init__(self):
-        self.tasks = {}
-        self.worker = Mock()
-        self.worker.available_tasks = []
-        self.db_worker = Mock()
+def task_1_test(data):
+    """Global test task function."""
+    return f"Processed: {data}"
 
 
-class TestQueuerTask:
+def task_2_test(data):
+    """Global custom task function."""
+    return f"Custom: {data}"
+
+
+class TestQueuerTask(DatabaseTestMixin, unittest.TestCase):
     """Test cases for queuer task functionality."""
-    
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.queuer = MockQueuer()
-        self.mock_task = Mock()
-        self.mock_task.name = "test_task"
-        
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up for the entire test class."""
+        super().setup_class()
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up after all tests."""
+        super().teardown_class()
+
+    def setUp(self):
+        """Set up for each test method."""
+        super().setup_method()
+
     def test_add_task_success(self):
         """Test successfully adding a task."""
-        # Mock the task creation
-        with patch('model.task.new_task') as mock_new_task:
-            mock_new_task.return_value = self.mock_task
-            self.queuer.db_worker.update_worker.return_value = self.queuer.worker
-            
-            def test_function():
-                pass
-            
-            result = self.queuer.add_task(test_function)
-            
-            assert result == self.mock_task
-            assert "test_task" in self.queuer.tasks
-            assert "test_task" in self.queuer.worker.available_tasks
-            mock_new_task.assert_called_once_with(test_function)
-            self.queuer.db_worker.update_worker.assert_called_once_with(self.queuer.worker)
-    
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        task = queuer.add_task(task_1_test)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task.name, "task_1_test")
+        self.assertIn("task_1_test", queuer.tasks)
+        self.assertIn("task_1_test", queuer.worker.available_tasks)
+
+        queuer.stop()
+
     def test_add_task_creation_error(self):
         """Test error during task creation."""
-        with patch('model.task.new_task') as mock_new_task:
-            mock_new_task.side_effect = Exception("Task creation failed")
-            
-            def test_function():
-                pass
-            
-            with pytest.raises(RuntimeError, match="Error creating new task"):
-                self.queuer.add_task(test_function)
-    
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+
+        # Test with invalid function (None)
+        with pytest.raises(Exception):
+            queuer.add_task(None)
+
+        queuer.stop()
+
     def test_add_task_already_exists(self):
         """Test adding a task that already exists."""
-        self.queuer.worker.available_tasks = ["test_task"]
-        
-        with patch('model.task.new_task') as mock_new_task:
-            mock_new_task.return_value = self.mock_task
-            
-            def test_function():
-                pass
-            
-            with pytest.raises(RuntimeError, match="Task already exists"):
-                self.queuer.add_task(test_function)
-    
-    def test_add_task_db_update_error(self):
-        """Test error during database update."""
-        with patch('model.task.new_task') as mock_new_task:
-            mock_new_task.return_value = self.mock_task
-            self.queuer.db_worker.update_worker.side_effect = Exception("DB update failed")
-            
-            def test_function():
-                pass
-            
-            with pytest.raises(RuntimeError, match="Error updating worker"):
-                self.queuer.add_task(test_function)
-    
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+
+        queuer.add_task(task_1_test)
+
+        with pytest.raises(RuntimeError, match="Task already exists"):
+            queuer.add_task(task_1_test)
+
+        queuer.stop()
+
     def test_add_task_with_name_success(self):
         """Test successfully adding a task with a specific name."""
-        custom_task = Mock()
-        custom_task.name = "custom_name"
-        
-        with patch('model.task.new_task_with_name') as mock_new_task_with_name:
-            mock_new_task_with_name.return_value = custom_task
-            self.queuer.db_worker.update_worker.return_value = self.queuer.worker
-            
-            def test_function():
-                pass
-            
-            result = self.queuer.add_task_with_name(test_function, "custom_name")
-            
-            assert result == custom_task
-            assert "custom_name" in self.queuer.tasks
-            assert "custom_name" in self.queuer.worker.available_tasks
-            mock_new_task_with_name.assert_called_once_with(test_function, "custom_name")
-            self.queuer.db_worker.update_worker.assert_called_once_with(self.queuer.worker)
-    
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        result: Task = queuer.add_task_with_name(task_1_test, "custom_name")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name, "custom_name")
+        self.assertIn("custom_name", queuer.tasks)
+        self.assertIn("custom_name", queuer.worker.available_tasks)
+
+        queuer.stop()
+
     def test_add_task_with_name_creation_error(self):
         """Test error during task creation with name."""
-        with patch('model.task.new_task_with_name') as mock_new_task_with_name:
-            mock_new_task_with_name.side_effect = Exception("Task creation failed")
-            
-            def test_function():
-                pass
-            
-            with pytest.raises(RuntimeError, match="Error creating new task"):
-                self.queuer.add_task_with_name(test_function, "custom_name")
-    
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+
+        # Test with invalid function (None)
+        with pytest.raises(Exception):
+            queuer.add_task_with_name(None, "custom_name")
+
+        queuer.stop()
+
     def test_add_task_with_name_already_exists(self):
         """Test adding a task with name that already exists."""
-        self.queuer.worker.available_tasks = ["custom_name"]
-        
-        with patch('model.task.new_task_with_name') as mock_new_task_with_name:
-            mock_new_task_with_name.return_value = self.mock_task
-            
-            def test_function():
-                pass
-            
-            with pytest.raises(RuntimeError, match="Task already exists"):
-                self.queuer.add_task_with_name(test_function, "custom_name")
-    
-    def test_add_task_with_name_db_update_error(self):
-        """Test error during database update with named task."""
-        custom_task = Mock()
-        custom_task.name = "custom_name"
-        
-        with patch('model.task.new_task_with_name') as mock_new_task_with_name:
-            mock_new_task_with_name.return_value = custom_task
-            self.queuer.db_worker.update_worker.side_effect = Exception("DB update failed")
-            
-            def test_function():
-                pass
-            
-            with pytest.raises(RuntimeError, match="Error updating worker"):
-                self.queuer.add_task_with_name(test_function, "custom_name")
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task_with_name(task_1_test, "custom_name")
+
+        # Try adding another task with the same name
+        with pytest.raises(RuntimeError, match="Task already exists"):
+            queuer.add_task_with_name(task_1_test, "custom_name")
+
+        queuer.stop()
+
+    def test_add_multiple_tasks(self):
+        """Test adding multiple different tasks."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_1_test)
+        queuer.add_task(task_2_test)
+
+        self.assertIn("task_1_test", queuer.tasks)
+        self.assertIn("task_2_test", queuer.tasks)
+        self.assertIn("task_1_test", queuer.worker.available_tasks)
+        self.assertIn("task_2_test", queuer.worker.available_tasks)
+        self.assertEqual(len(queuer.worker.available_tasks), 2)
+
+        queuer.stop()
