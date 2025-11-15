@@ -16,6 +16,7 @@ from uuid import UUID
 
 
 # Local imports - database components
+from core.ticker import Ticker
 from database.db_job import JobDBHandler
 from database.db_worker import WorkerDBHandler
 from database.db_listener import QueuerListener, new_queuer_db_listener
@@ -256,14 +257,12 @@ class Queuer(
         if self._heartbeat_ticker:
             try:
                 self._heartbeat_ticker.stop()
-                logger.info("Stopped heartbeat ticker")
             except Exception as e:
                 logger.warning(f"Error stopping heartbeat ticker: {e}")
 
         if self._poll_job_ticker:
             try:
                 self._poll_job_ticker.stop()
-                logger.info("Stopped poll job ticker")
             except Exception as e:
                 logger.warning(f"Error stopping poll job ticker: {e}")
 
@@ -433,6 +432,7 @@ class Queuer(
 
         logger.info(f"Queuer '{self.worker.name}' stopped")
 
+    # Job notification listeners
     async def _handle_job_notification(self, notification):
         """
         Handle job database notifications.
@@ -560,6 +560,7 @@ class Queuer(
             f"Database listeners failed to become ready within {timeout_seconds} seconds"
         )
 
+    # Tickers
     def _heartbeat_func(self):
         """Send periodic heartbeats - only updates database, not queuer state."""
         try:
@@ -577,12 +578,11 @@ class Queuer(
 
     def _start_heartbeat_ticker(self):
         """Start heartbeat ticker using threading."""
-        from core.ticker import Ticker
-
         self._heartbeat_ticker = Ticker(
-            timedelta(seconds=30), self._heartbeat_func, use_mp=False
+            timedelta(seconds=30),
+            self._heartbeat_func,
+            use_mp=False,
         )
-        logger.info("Starting heartbeat ticker...")
         self._heartbeat_ticker.go()
 
     def _poll_jobs_func(self):
@@ -593,6 +593,19 @@ class Queuer(
         except Exception as e:
             logger.warning(f"Backup job polling error: {e}")
 
+    def _start_poll_job_ticker(self):
+        """
+        Start job polling ticker as backup mechanism.
+        This provides a safety net in case notification-based processing fails.
+        """
+        self._poll_job_ticker = Ticker(
+            self.job_poll_interval,
+            self._poll_jobs_func,
+            use_mp=False,
+        )
+        self._poll_job_ticker.go()
+
+    # Database listeners
     async def _start_job_listener(self, handle_job_notification):
         """
         Start job database listener.
@@ -608,34 +621,3 @@ class Queuer(
         :param handle_job_archive_notification: The callback to handle job archive notifications
         """
         await self.job_archive_db_listener.listen(handle_job_archive_notification)
-
-    def _start_poll_job_ticker(self):
-        """
-        Start job polling ticker as backup mechanism.
-        This provides a safety net in case notification-based processing fails.
-        """
-        from core.ticker import Ticker
-
-        self._poll_job_ticker = Ticker(
-            self.job_poll_interval, self._poll_jobs_func, use_mp=False
-        )
-        logger.info(
-            f"Starting backup job polling ticker (interval: {self.job_poll_interval})..."
-        )
-        self._poll_job_ticker.go()
-
-    async def _async_run_job_initial(self):
-        """
-        Async wrapper for _run_job_initial to avoid database transaction conflicts.
-        This ensures job processing runs in a separate context from the notification handler.
-        """
-        try:
-            # Use a small delay to ensure the notification transaction has completed
-            await asyncio.sleep(0.1)
-
-            # Run job processing in the main thread context
-            # Since _run_job_initial is synchronous, we need to run it properly
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._run_job_initial)
-        except Exception as e:
-            logger.error(f"Error in async job processing: {e}")

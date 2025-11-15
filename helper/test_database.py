@@ -86,7 +86,7 @@ class DatabaseTestMixin:
             open_files = len(process.open_files())
             connections = len(process.net_connections())
 
-            logger.debug(
+            logger.warning(
                 f"📊 DIAGNOSTIC - Memory: {memory_mb:.1f} MB, Open files: {open_files}, Connections: {connections}"
             )
 
@@ -99,11 +99,11 @@ class DatabaseTestMixin:
 
             for thread in threading.enumerate():
                 if thread != threading.main_thread():
-                    logger.debug(
+                    logger.warning(
                         f"🧵 Active thread: {thread.name} ({type(thread).__name__})"
                     )
         except Exception as e:
-            logger.debug("📊 DIAGNOSTIC - monitoring not available")
+            logger.warning("📊 DIAGNOSTIC - monitoring not available")
 
     @classmethod
     def _set_database_env_vars(cls):

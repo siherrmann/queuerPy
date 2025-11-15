@@ -128,7 +128,7 @@ class Ticker:
             self._runner.join(timeout=5.0)
 
         self._runner = None
-        logger.info(f"Stopped Ticker for '{self._task.__name__}'...")
+        logger.info(f"Ticker '{self._task.__name__}' stopped.")
 
     def is_running(self) -> bool:
         """
