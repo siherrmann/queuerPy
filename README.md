@@ -2,6 +2,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/siherrmann/queuer/blob/master/LICENSE)
+[![Coverage](./coverage-badge.svg)]
 
 Python port of the queuer package - a queueing system based on PostgreSQL.
 
