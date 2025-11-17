@@ -31,6 +31,16 @@ def failing_task_sync():
     raise ValueError("This task always fails")
 
 
+def task_with_kwargs(a, b, multiplier=1):
+    """Task with keyword arguments for testing."""
+    return (a + b) * multiplier
+
+
+def simple_task():
+    """Simple task returning success string."""
+    return "success"
+
+
 class TestRunner(unittest.TestCase):
     """Test the singleton Runner implementation."""
 
@@ -41,12 +51,14 @@ class TestRunner(unittest.TestCase):
         runner.go()
         result = runner.get_results(timeout=2.0)
         self.assertEqual(result, 3.1, "Expected 0.1 + 3 = 3.1")
+        self.assertEqual(runner.exitcode, 0)
 
         # Test sync task
         runner2 = Runner(task_sync, (0.1, 2), {})
         runner2.go()
         result2 = runner2.get_results(timeout=2.0)
         self.assertEqual(result2, 2.1, "Expected 0.1 + 2 = 2.1")
+        self.assertEqual(runner2.exitcode, 0)
 
     def test_failed_task(self):
         """Test running a task that fails."""
@@ -61,6 +73,44 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(
             str(context.exception), "This task always fails", "Expected error message"
         )
+
+    def test_runner_initialization(self):
+        """Test Runner initialization and properties."""
+        runner = Runner(task_sync, (1, 2), {"extra": "value"})
+
+        self.assertEqual(runner.task, task_sync)
+        self.assertEqual(runner.args, (1, 2))
+        self.assertEqual(runner.kwargs, {"extra": "value"})
+        self.assertFalse(runner.is_async)
+        self.assertTrue(runner.name.startswith("Runner-task_sync"))
+        self.assertTrue(runner.daemon)
+
+    def test_async_runner_initialization(self):
+        """Test async Runner initialization."""
+        runner = Runner(task_async, (1, 2), {}, name_prefix="AsyncTest")
+
+        self.assertEqual(runner.task, task_async)
+        self.assertTrue(runner.is_async)
+        self.assertTrue(runner.name.startswith("AsyncTest-task_async"))
+
+    def test_runner_with_kwargs(self):
+        """Test runner with keyword arguments."""
+        runner = Runner(task_with_kwargs, (2, 3), {"multiplier": 5})
+        runner.go()
+        result = runner.get_results(timeout=1.0)
+        self.assertEqual(result, 25)  # (2 + 3) * 5
+
+    def test_runner_name_generation(self):
+        """Test runner name generation with different prefixes."""
+
+        def test_function():
+            pass
+
+        runner1 = Runner(test_function, (), {})
+        runner2 = Runner(test_function, (), {}, name_prefix="Custom")
+
+        self.assertTrue(runner1.name.startswith("Runner-test_function"))
+        self.assertTrue(runner2.name.startswith("Custom-test_function"))
 
     def test_parameter_validation(self):
         """Test parameter validation."""

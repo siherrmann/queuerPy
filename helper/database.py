@@ -55,10 +55,11 @@ class DatabaseConfiguration:
                 schema.strip(),
             ]
         ):
-            raise QueuerError(
+            raise ValueError(
                 "Required environment variables missing: "
                 "QUEUER_DB_HOST, QUEUER_DB_PORT, QUEUER_DB_DATABASE, "
-                "QUEUER_DB_USERNAME, QUEUER_DB_SCHEMA must be set"
+                "QUEUER_DB_USERNAME, QUEUER_DB_SCHEMA must be set",
+                "Missing required environment variables",
             )
 
         return cls(
@@ -114,7 +115,10 @@ class Database:
         Mirrors Go's ConnectToDatabase method.
         """
         if not self.config:
-            raise QueuerError("Database configuration is required for connection")
+            raise QueuerError(
+                "Database configuration is required for connection",
+                ValueError("No config provided"),
+            )
 
         try:
             # Create connection
