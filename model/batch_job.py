@@ -15,11 +15,6 @@ class BatchJob:
     Represents a batch job with task, parameters, and options.
     """
 
-    task: Union[Callable, str]
+    task: Union[Callable[..., Any], str]
     parameters: List[Any]
     options: Optional[Options] = None
-
-    def __post_init__(self):
-        """Validate the batch job after initialization."""
-        if self.parameters is None:
-            self.parameters = []

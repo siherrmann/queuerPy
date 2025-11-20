@@ -5,6 +5,7 @@ Based on the Go queuerTest.go implementation.
 
 import threading
 import time
+from typing import List
 import unittest
 
 from core.runner import SmallRunner, go_func
@@ -96,10 +97,11 @@ class TestNewQueuer(DatabaseTestMixin, unittest.TestCase):
 
         # Check that worker has the options applied
         self.assertIsNotNone(queuer.worker.options)
-        self.assertEqual(10.0, queuer.worker.options.timeout)
-        self.assertEqual(3, queuer.worker.options.max_retries)
-        self.assertEqual(1.0, queuer.worker.options.retry_delay)
-        self.assertEqual(RetryBackoff.LINEAR, queuer.worker.options.retry_backoff)
+        if queuer.worker.options:
+            self.assertEqual(10.0, queuer.worker.options.timeout)
+            self.assertEqual(3, queuer.worker.options.max_retries)
+            self.assertEqual(1.0, queuer.worker.options.retry_delay)
+            self.assertEqual(RetryBackoff.LINEAR, queuer.worker.options.retry_backoff)
 
     def test_invalid_max_concurrency(self):
         """Test that invalid max concurrency raises error."""
@@ -163,15 +165,13 @@ class TestQueuerStart(DatabaseTestMixin, unittest.TestCase):
         try:
             # Start should not raise an exception
             queuer.start()
-            self.assertTrue(
-                queuer._running, "Expected queuer to be running after start"
-            )
+            self.assertTrue(queuer.running, "Expected queuer to be running after start")
 
             # Worker status should be RUNNING
             self.assertEqual(WorkerStatus.RUNNING, queuer.worker.status)
 
         finally:
-            if queuer._running:
+            if queuer.running:
                 queuer.stop()
 
     def test_start_queuer_already_running(self):
@@ -180,14 +180,13 @@ class TestQueuerStart(DatabaseTestMixin, unittest.TestCase):
 
         try:
             queuer.start()
-            self.assertTrue(queuer._running)
+            self.assertTrue(queuer.running)
 
             # Starting again should raise RuntimeError
             with self.assertRaises(RuntimeError):
                 queuer.start()
-
         finally:
-            if queuer._running:
+            if queuer.running:
                 queuer.stop()
 
 
@@ -217,12 +216,10 @@ class TestQueuerStop(DatabaseTestMixin, unittest.TestCase):
 
         # Start and then stop
         queuer.start()
-        self.assertTrue(queuer._running)
+        self.assertTrue(queuer.running)
 
         queuer.stop()
-        self.assertFalse(
-            queuer._running, "Expected queuer to not be running after stop"
-        )
+        self.assertFalse(queuer.running, "Expected queuer to not be running after stop")
 
     def test_stop_not_running_queuer(self):
         """Test stopping a queuer that's not running."""
@@ -230,7 +227,7 @@ class TestQueuerStop(DatabaseTestMixin, unittest.TestCase):
 
         # Stop should work even if not started - should not raise error
         queuer.stop()
-        self.assertFalse(queuer._running)
+        self.assertFalse(queuer.running)
 
 
 class TestQueuerHeartbeat(DatabaseTestMixin, unittest.TestCase):
@@ -256,19 +253,15 @@ class TestQueuerHeartbeat(DatabaseTestMixin, unittest.TestCase):
 
         try:
             queuer.start()
-            self.assertTrue(queuer._running)
-            self.assertIsNotNone(
-                queuer._heartbeat_ticker, "Expected heartbeat ticker to be initialized"
-            )
-            self.assertTrue(
-                queuer._heartbeat_ticker.is_running(),
-                "Expected heartbeat ticker to be running",
-            )
+            self.assertTrue(queuer.running)
+            self.assertIsNotNone(queuer.heartbeat_ticker)
+            if queuer.heartbeat_ticker:
+                self.assertTrue(queuer.heartbeat_ticker.is_running())
 
             time.sleep(0.5)
-            self.assertIsNotNone(queuer.worker, "Expected worker to still exist")
+            self.assertIsNotNone(queuer.worker)
         finally:
-            if queuer._running:
+            if queuer.running:
                 queuer.stop()
 
     def test_heartbeat_ticker_stops(self):
@@ -276,16 +269,17 @@ class TestQueuerHeartbeat(DatabaseTestMixin, unittest.TestCase):
         queuer = new_queuer_with_db("test_heartbeat_stop", 10, "", self.db_config)
 
         queuer.start()
-        self.assertTrue(queuer._running)
-        self.assertIsNotNone(queuer._heartbeat_ticker)
-        self.assertTrue(queuer._heartbeat_ticker.is_running())
+        self.assertTrue(queuer.running)
+        self.assertIsNotNone(queuer.heartbeat_ticker)
+        if queuer.heartbeat_ticker:
+            self.assertTrue(queuer.heartbeat_ticker.is_running())
 
         queuer.stop()
-        self.assertFalse(queuer._running)
+        self.assertFalse(queuer.running)
 
-        if queuer._heartbeat_ticker:
+        if queuer.heartbeat_ticker:
             self.assertFalse(
-                queuer._heartbeat_ticker.is_running(),
+                queuer.heartbeat_ticker.is_running(),
                 "Expected heartbeat ticker to be stopped",
             )
 
@@ -337,9 +331,7 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
         try:
             queuer.add_task(global_simple_task)
 
-            # Add a job
             job = queuer.add_job(global_simple_task, 42)
-
             self.assertIsNotNone(job, "Expected job to be created")
             self.assertEqual("global_simple_task", job.task_name)
             self.assertIsNotNone(job.rid, "Expected job to have a RID")
@@ -351,9 +343,9 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
 
     def test_add_job_without_task_registration(self):
         """Test adding job without registering task."""
-        try:
-            queuer = new_queuer_with_db("test_job_no_task", 10, "", self.db_config)
+        queuer = new_queuer_with_db("test_job_no_task", 10, "", self.db_config)
 
+        try:
             job = queuer.add_job("global_simple_task", 42)
             self.assertIsNotNone(job)
             self.assertEqual("global_simple_task", job.task_name)
@@ -370,7 +362,7 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
         try:
             queuer.add_task(global_test_task)
 
-            jobs = []
+            jobs: List[Job] = []
             start_time = time.time()
 
             for i in range(5):
@@ -413,13 +405,13 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
     def test_rapid_job_insertion_no_hanging(self):
         """Test that rapid job insertion doesn't hang with notification system."""
         queuer = new_queuer_with_db("test_no_hang", 5, "", self.db_config)
-        listener_runner: SmallRunner = SmallRunner(queuer.listen_for_job_insert, (), {})
+        listener_runner: SmallRunner = SmallRunner(queuer.listen_for_job_insert)
 
         try:
             queuer.add_task(global_simple_task)
             queuer.start()
 
-            jobs = []
+            jobs: List[Job] = []
             jobs_lock = threading.Lock()
 
             def on_job_inserted(job: Job):
@@ -427,11 +419,13 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
                 with jobs_lock:
                     jobs.append(job)
 
-            listener_runner: SmallRunner = go_func(
+            runner = go_func(
                 queuer.listen_for_job_insert,
                 use_mp=False,
                 notify_function=on_job_inserted,
             )
+            if runner and isinstance(runner, SmallRunner):
+                listener_runner: SmallRunner = runner
 
             # Give the listener a moment to start up
             time.sleep(0.5)

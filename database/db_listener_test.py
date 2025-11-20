@@ -19,19 +19,11 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
     def setup_method(self):
         """Set up test environment with real PostgreSQL container."""
         super().setup_method()
-        self._test_listeners = []
+        self._test_listeners: list[QueuerListener] = []
 
-    def teardown_method(self, method=None):
+    def teardown_method(self):
         """Clean up test environment."""
-        # Clean up listeners
-        for listener in self._test_listeners:
-            try:
-                # Stop listener if needed (async cleanup would be better but this is teardown)
-                pass
-            except Exception as e:
-                print(f"Error cleaning up listener: {e}")
-
-        super().teardown_method(method)
+        super().teardown_method()
 
     def test_new_queuer_db_listener_real_connection(self):
         """Test creating listener with real database connection."""
@@ -64,7 +56,7 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
         assert listener.connection is None
 
         # Start connecting manually (like what happens during listen)
-        await listener._connect()
+        await listener.connect()
 
         # Now connection should be established
         assert (
@@ -92,16 +84,16 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
 
         # Error should occur when trying to connect/listen
         with pytest.raises(QueuerError) as exc_info:
-            await listener._connect()
+            await listener.connect()
 
         assert "listen" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_listen_for_real_notifications(self):
         """Test that listener receives real PostgreSQL notifications."""
-        received_notifications = []
+        received_notifications: list[str] = []
 
-        async def async_callback(payload):
+        async def async_callback(payload: str):
             received_notifications.append(payload)
 
         config = self.db_config
@@ -150,9 +142,9 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
     @pytest.mark.asyncio
     async def test_listen_with_multiple_notifications(self):
         """Test listener handles multiple notifications correctly."""
-        received_notifications = []
+        received_notifications: list[str] = []
 
-        async def async_callback(payload):
+        async def async_callback(payload: str):
             received_notifications.append(payload)
 
         config = self.db_config
@@ -205,9 +197,9 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
     @pytest.mark.asyncio
     async def test_listen_ignores_other_channels(self):
         """Test that listener only processes notifications for its channel."""
-        received_notifications = []
+        received_notifications: list[str] = []
 
-        async def async_callback(payload):
+        async def async_callback(payload: str):
             received_notifications.append(payload)
 
         config = self.db_config
@@ -265,9 +257,9 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
         self._test_listeners.append(listener)
 
         # Track that no notifications are processed
-        received_notifications = []
+        received_notifications: list[str] = []
 
-        async def async_callback(payload):
+        async def async_callback(payload: str):
             received_notifications.append(payload)
 
         # Start listening

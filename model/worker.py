@@ -28,14 +28,14 @@ class Worker:
 
     # Core identifiers - set automatically
     id: int = 0
-    rid: UUID = field(default_factory=uuid4)
+    rid: UUID = uuid4()
 
     # Worker configuration
     name: str = ""
     options: Optional[OnError] = None
     max_concurrency: int = 1
-    available_tasks: List[str] = field(default_factory=list)
-    available_next_interval_funcs: List[str] = field(default_factory=list)
+    available_tasks: List[str] = field(default_factory=lambda: [])
+    available_next_interval_funcs: List[str] = field(default_factory=lambda: [])
 
     # Worker state
     status: str = WorkerStatus.READY
@@ -44,7 +44,7 @@ class Worker:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert worker to dictionary for serialization."""
         return {
             "id": self.id,
@@ -60,7 +60,7 @@ class Worker:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Worker":
+    def from_dict(cls, data: Dict[str, Any]) -> "Worker":
         """Create worker from dictionary."""
         worker = cls()
         worker.id = data.get("id", 0)

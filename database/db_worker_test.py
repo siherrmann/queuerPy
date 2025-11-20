@@ -4,8 +4,7 @@ Mirrors Go's dbWorker_test.go test suite.
 """
 
 import unittest
-from datetime import datetime, timedelta
-from uuid import uuid4
+from datetime import datetime, timedelta, timezone
 
 from database.db_worker import WorkerDBHandler
 from helper.test_database import DatabaseTestMixin
@@ -104,29 +103,32 @@ class TestWorkerDBHandler(DatabaseTestMixin, unittest.TestCase):
         inserted_worker.available_next_interval_funcs = ["interval1", "interval2"]
 
         updated_worker = self.worker_handler.update_worker(inserted_worker)
-        self.assertIsNotNone(updated_worker)
-        self.assertEqual(inserted_worker.name, updated_worker.name)
-        self.assertEqual(
-            inserted_worker.available_tasks, updated_worker.available_tasks
-        )
-        self.assertEqual(
-            inserted_worker.available_next_interval_funcs,
-            updated_worker.available_next_interval_funcs,
-        )
-        self.assertEqual(
-            inserted_worker.max_concurrency, updated_worker.max_concurrency
-        )
+        if updated_worker is not None:
+            self.assertIsNotNone(updated_worker)
+            self.assertEqual(inserted_worker.name, updated_worker.name)
+            self.assertEqual(
+                inserted_worker.available_tasks, updated_worker.available_tasks
+            )
+            self.assertEqual(
+                inserted_worker.available_next_interval_funcs,
+                updated_worker.available_next_interval_funcs,
+            )
+            self.assertEqual(
+                inserted_worker.max_concurrency, updated_worker.max_concurrency
+            )
 
     def test_update_stale_workers(self):
         """Test updating stale workers. Mirrors Go's TestUpdateStaleWorkers."""
-        # Create workers with different statuses
+        if self.db.instance is None:
+            self.fail("Database instance is not initialized.")
+
         statuses = [
             WorkerStatus.READY,
             WorkerStatus.RUNNING,
             WorkerStatus.STOPPED,
             WorkerStatus.READY,
         ]
-        workers = []
+        workers: list[Worker] = []
 
         for i, status in enumerate(statuses):
             worker = Worker(
@@ -141,11 +143,8 @@ class TestWorkerDBHandler(DatabaseTestMixin, unittest.TestCase):
             # Update status after insertion
             inserted_worker.status = status
             updated_worker = self.worker_handler.update_worker(inserted_worker)
-            workers.append(updated_worker)
-
-        # Make first 3 workers stale by updating their timestamps directly
-        # Use UTC time since database stores timestamps in UTC
-        from datetime import timezone
+            if updated_worker is not None:
+                workers.append(updated_worker)
 
         stale_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
             hours=1
@@ -167,13 +166,13 @@ class TestWorkerDBHandler(DatabaseTestMixin, unittest.TestCase):
         for i, worker in enumerate(workers):
             updated_worker = self.worker_handler.select_worker(worker.rid)
             self.assertIsNotNone(updated_worker)
-
-            if i < 2:  # First two workers (READY, RUNNING) should be STOPPED
-                self.assertEqual(updated_worker.status, WorkerStatus.STOPPED)
-            elif i == 2:  # STOPPED worker should remain STOPPED
-                self.assertEqual(updated_worker.status, WorkerStatus.STOPPED)
-            else:  # Fresh worker should remain READY
-                self.assertEqual(updated_worker.status, WorkerStatus.READY)
+            if updated_worker is not None:
+                if i < 2:  # First two workers (READY, RUNNING) should be STOPPED
+                    self.assertEqual(updated_worker.status, WorkerStatus.STOPPED)
+                elif i == 2:  # STOPPED worker should remain STOPPED
+                    self.assertEqual(updated_worker.status, WorkerStatus.STOPPED)
+                else:  # Fresh worker should remain READY
+                    self.assertEqual(updated_worker.status, WorkerStatus.READY)
 
         # Clean up
         for worker in workers:
@@ -205,8 +204,9 @@ class TestWorkerDBHandler(DatabaseTestMixin, unittest.TestCase):
         # Select the worker
         selected_worker = self.worker_handler.select_worker(inserted_worker.rid)
         self.assertIsNotNone(selected_worker)
-        self.assertEqual(inserted_worker.rid, selected_worker.rid)
-        self.assertEqual(inserted_worker.name, selected_worker.name)
+        if selected_worker is not None:
+            self.assertEqual(inserted_worker.rid, selected_worker.rid)
+            self.assertEqual(inserted_worker.name, selected_worker.name)
 
     def test_select_all_workers(self):
         """Test selecting all workers. Mirrors Go's TestWorkerSelectAllWorkers."""

@@ -17,7 +17,7 @@ class TestRunDDL(unittest.TestCase):
     """Test cases for run_ddl function."""
 
     @patch("helper.sql._DDL_LOCK")
-    def test_run_ddl_success(self, mock_lock):
+    def test_run_ddl_success(self, mock_lock: MagicMock):
         """Test successful DDL execution."""
         mock_conn = Mock()
         mock_cursor = MagicMock()
@@ -33,11 +33,11 @@ class TestRunDDL(unittest.TestCase):
         run_ddl(mock_conn, "CREATE TABLE test (id INT);")
 
         mock_conn.rollback.assert_called_once()
-        mock_cursor.execute.assert_called_once_with("CREATE TABLE test (id INT);")
+        mock_cursor.execute.assert_called_once_with(b"CREATE TABLE test (id INT);")
         mock_conn.commit.assert_called_once()
 
     @patch("helper.sql.time.sleep")
-    def test_run_ddl_retry_on_deadlock(self, mock_sleep):
+    def test_run_ddl_retry_on_deadlock(self, mock_sleep: MagicMock):
         """Test DDL retry on deadlock."""
         mock_conn = Mock()
         mock_cursor = MagicMock()
@@ -112,13 +112,13 @@ class TestSQLLoader(unittest.TestCase):
         sql_file = Path(self.temp_dir) / "test.sql"
         sql_file.write_text(sql_content)
 
-        content = self.sql_loader._load_sql_file(str(sql_file))
+        content = self.sql_loader.load_sql_file(str(sql_file))
         self.assertEqual(content, sql_content)
 
     def test_load_sql_file_not_found(self):
         """Test loading non-existent SQL file."""
         with self.assertRaises(ValueError) as cm:
-            self.sql_loader._load_sql_file("/nonexistent/file.sql")
+            self.sql_loader.load_sql_file("/nonexistent/file.sql")
         self.assertIn("SQL file not found", str(cm.exception))
 
     def test_check_functions_all_exist(self):
@@ -131,7 +131,7 @@ class TestSQLLoader(unittest.TestCase):
         mock_cursor.__exit__.return_value = None
         mock_cursor.fetchone.return_value = [True]
 
-        result = self.sql_loader._check_functions(mock_conn, ["func1", "func2"])
+        result = self.sql_loader.check_functions(mock_conn, ["func1", "func2"])
         self.assertTrue(result)
         self.assertEqual(mock_cursor.execute.call_count, 2)
 
@@ -145,12 +145,14 @@ class TestSQLLoader(unittest.TestCase):
         mock_cursor.__exit__.return_value = None
         mock_cursor.fetchone.side_effect = [[True], [False]]
 
-        result = self.sql_loader._check_functions(mock_conn, ["func1", "func2"])
+        result = self.sql_loader.check_functions(mock_conn, ["func1", "func2"])
         self.assertFalse(result)
 
-    @patch.object(SQLLoader, "_execute_sql_file")
-    @patch.object(SQLLoader, "_check_functions")
-    def test_load_job_sql_functions_exist(self, mock_check, mock_execute):
+    @patch.object(SQLLoader, "execute_sql_file")
+    @patch.object(SQLLoader, "check_functions")
+    def test_load_job_sql_functions_exist(
+        self, mock_check: MagicMock, mock_execute: MagicMock
+    ):
         """Test loading job SQL when functions already exist."""
         mock_check.return_value = True
 
@@ -160,9 +162,11 @@ class TestSQLLoader(unittest.TestCase):
         mock_check.assert_called_once_with(mock_conn, self.sql_loader.JOB_FUNCTIONS)
         mock_execute.assert_not_called()
 
-    @patch.object(SQLLoader, "_execute_sql_file")
-    @patch.object(SQLLoader, "_check_functions")
-    def test_load_job_sql_force_reload(self, mock_check, mock_execute):
+    @patch.object(SQLLoader, "execute_sql_file")
+    @patch.object(SQLLoader, "check_functions")
+    def test_load_job_sql_force_reload(
+        self, mock_check: MagicMock, mock_execute: MagicMock
+    ):
         """Test loading job SQL with force=True."""
         mock_check.return_value = True
 
@@ -173,9 +177,11 @@ class TestSQLLoader(unittest.TestCase):
 
         mock_execute.assert_called_once_with(mock_conn, expected_path)
 
-    @patch.object(SQLLoader, "_execute_sql_file")
-    @patch.object(SQLLoader, "_check_functions")
-    def test_load_job_sql_verification_fails(self, mock_check, mock_execute):
+    @patch.object(SQLLoader, "execute_sql_file")
+    @patch.object(SQLLoader, "check_functions")
+    def test_load_job_sql_verification_fails(
+        self, mock_check: MagicMock, mock_execute: MagicMock
+    ):
         """Test loading job SQL when verification fails."""
         mock_check.side_effect = [
             False,
@@ -201,7 +207,7 @@ class TestSQLLoader(unittest.TestCase):
         mock_conn = Mock()
 
         with patch("helper.sql.run_ddl") as mock_run_ddl:
-            self.sql_loader._execute_sql_file(mock_conn, str(sql_file))
+            self.sql_loader.execute_sql_file(mock_conn, str(sql_file))
             mock_run_ddl.assert_called_once_with(mock_conn, sql_content)
 
     def test_function_lists_defined(self):

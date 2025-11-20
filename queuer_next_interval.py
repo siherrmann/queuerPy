@@ -4,21 +4,24 @@ Mirrors Go's queuerNextInterval.go functionality.
 """
 
 import logging
-from typing import Callable, Union, TYPE_CHECKING
+from typing import Any, Callable
 
-if TYPE_CHECKING:
-    from model.worker import Worker
+from queuer_global import QueuerGlobalMixin
+from model.worker import Worker
 
 logger = logging.getLogger(__name__)
 
 
-class QueuerNextIntervalMixin:
+class QueuerNextIntervalMixin(QueuerGlobalMixin):
     """
     Mixin class containing next interval function-related methods for the Queuer.
     Mirrors Go's queuerNextInterval.go functionality.
     """
 
-    def add_next_interval_func(self, nif: Callable) -> "Worker":
+    def __init__(self):
+        super().__init__()
+
+    def add_next_interval_func(self, nif: Callable[..., Any]) -> Worker:
         """
         Add a NextIntervalFunc to the worker's available next interval functions.
         Takes a NextIntervalFunc and adds it to the worker's available_next_interval_funcs.
@@ -47,13 +50,17 @@ class QueuerNextIntervalMixin:
 
         try:
             worker = self.db_worker.update_worker(self.worker)
+            if not worker:
+                raise Exception("Worker could not be updated")
+
+            logger.info(f"NextInterval function added: {nif_name}")
+            return worker
         except Exception as e:
             raise RuntimeError(f"Error updating worker: {str(e)}")
 
-        logger.info(f"NextInterval function added: {nif_name}")
-        return worker
-
-    def add_next_interval_func_with_name(self, nif: Callable, name: str) -> "Worker":
+    def add_next_interval_func_with_name(
+        self, nif: Callable[..., Any], name: str
+    ) -> Worker:
         """
         Add a NextIntervalFunc to the worker's available next interval functions with a specific name.
         Takes a NextIntervalFunc and a name, checks if the function is not None
@@ -80,8 +87,10 @@ class QueuerNextIntervalMixin:
 
         try:
             worker = self.db_worker.update_worker(self.worker)
+            if not worker:
+                raise Exception("Worker could not be updated")
+
+            logger.info(f"NextInterval function added: {name}")
+            return worker
         except Exception as e:
             raise RuntimeError(f"Error updating worker: {str(e)}")
-
-        logger.info(f"NextInterval function added: {name}")
-        return worker

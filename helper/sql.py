@@ -6,6 +6,7 @@ Uses helper.database classes and references the same SQL submodule as Go.
 import os
 import time
 import threading
+from typing import List, Optional
 from psycopg import Connection, errors
 from pathlib import Path
 
@@ -30,7 +31,7 @@ def run_ddl(conn: Connection, sql_statement: str, max_retries: int = 3):
             try:
                 conn.rollback()
                 with conn.cursor() as cur:
-                    cur.execute(sql_statement)
+                    cur.execute(sql_statement.encode("utf-8"))
                 conn.commit()
                 return
             except (errors.DeadlockDetected, errors.SerializationFailure) as e:
@@ -51,91 +52,127 @@ class SQLLoader:
     Matches the loadSql.go implementation exactly.
     """
 
-    # Function lists matching Go implementation
-    JOB_FUNCTIONS = [
+    JOB_FUNCTIONS: List[str] = [
         "update_job_initial",
         "update_job_final",
         "update_job_final_encrypted",
     ]
-    WORKER_FUNCTIONS = ["insert_worker", "update_worker", "delete_worker"]
-    NOTIFY_FUNCTIONS = ["notify_event"]
+    WORKER_FUNCTIONS: List[str] = ["insert_worker", "update_worker", "delete_worker"]
+    NOTIFY_FUNCTIONS: List[str] = ["notify_event"]
 
-    def __init__(self, sql_base_path: str = None):
-        """Initialize with path to SQL files (relative to Python project)."""
+    def __init__(self, sql_base_path: Optional[str] = None):
+        """
+        Initialize with path to SQL files (relative to Python project).
+
+        :param sql_base_path: Base path to SQL files. If None, defaults to ./sql directory.
+        """
         if sql_base_path is None:
             current_dir = Path(__file__).parent.parent
             sql_base_path = str(current_dir / "sql")
         self.sql_base_path = sql_base_path
 
-    def _load_sql_file(self, file_path: str) -> str:
-        """Load SQL content from file. Internal method."""
+    def load_sql_file(self, file_path: str) -> str:
+        """
+        Load SQL content from file. Internal method.
+
+        :param file_path: Path to the SQL file.
+        :returns: The content of the SQL file as a string.
+        :raises ValueError: If the file does not exist.
+        """
         try:
             with open(file_path, "r") as f:
                 return f.read()
         except FileNotFoundError:
             raise ValueError(f"SQL file not found: {file_path}")
 
-    def _execute_sql_file(self, connection: Connection, file_path: str) -> None:
-        """Execute SQL file content. Internal method."""
-        sql_content = self._load_sql_file(file_path)
+    def execute_sql_file(self, connection: Connection, file_path: str) -> None:
+        """
+        Execute SQL file content. Internal method.
+
+        :param connection: The Psycopg 3 connection object.
+        :param file_path: Path to the SQL file.
+        :raises ValueError: If the file does not exist.
+        """
+        sql_content: str = self.load_sql_file(file_path)
         run_ddl(connection, sql_content)
 
-    def _check_functions(self, connection: Connection, sql_functions: list) -> bool:
-        """Check if all SQL functions exist. Matches Go checkFunctions."""
+    def check_functions(self, connection: Connection, sql_functions: List[str]) -> bool:
+        """
+        Check if all SQL functions exist. Matches Go checkFunctions.
+
+        :param connection: The Psycopg 3 connection object.
+        :param sql_functions: List of SQL function names to check.
+        :returns: True if all functions exist, False otherwise.
+        """
         for func_name in sql_functions:
             with connection.cursor() as cur:
                 cur.execute(
                     "SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = %s);",
                     (func_name,),
                 )
-                exists = cur.fetchone()[0]
-
-                if not exists:
+                one = cur.fetchone()
+                if one is None or not one[0]:
                     return False
-
+        # All functions exist
         return True
 
     def load_job_sql(self, connection: Connection, force: bool = False) -> None:
-        """Load job-related SQL functions. Matches Go LoadJobSql."""
-        # Check if functions already exist (unless force=True)
+        """
+        Load job-related SQL functions. Matches Go LoadJobSql.
+
+        :param connection: The Psycopg 3 connection object.
+        :param force: If True, forces reloading even if functions exist.
+        :raises RuntimeError: If not all required job SQL functions were created.
+        """
         if not force:
-            if self._check_functions(connection, self.JOB_FUNCTIONS):
+            if self.check_functions(connection, self.JOB_FUNCTIONS):
                 return
 
         # Load the SQL file
         job_sql_path = os.path.join(self.sql_base_path, "job.sql")
-        self._execute_sql_file(connection, job_sql_path)
+        self.execute_sql_file(connection, job_sql_path)
 
         # Verify functions were created
-        if not self._check_functions(connection, self.JOB_FUNCTIONS):
+        if not self.check_functions(connection, self.JOB_FUNCTIONS):
             raise RuntimeError("Not all required job SQL functions were created")
 
     def load_worker_sql(self, connection: Connection, force: bool = False) -> None:
-        """Load worker-related SQL functions. Matches Go LoadWorkerSql."""
-        # Check if functions already exist (unless force=True)
+        """
+        Load worker-related SQL functions. Matches Go LoadWorkerSql.
+
+        :param connection: The Psycopg 3 connection object.
+        :param force: If True, forces reloading even if functions exist.
+        :raises RuntimeError: If not all required worker SQL functions were created.
+        """
         if not force:
-            if self._check_functions(connection, self.WORKER_FUNCTIONS):
+            if self.check_functions(connection, self.WORKER_FUNCTIONS):
                 return
 
         # Load the SQL file
         worker_sql_path = os.path.join(self.sql_base_path, "worker.sql")
-        self._execute_sql_file(connection, worker_sql_path)
+        self.execute_sql_file(connection, worker_sql_path)
 
         # Verify functions were created
-        if not self._check_functions(connection, self.WORKER_FUNCTIONS):
+        if not self.check_functions(connection, self.WORKER_FUNCTIONS):
             raise RuntimeError("Not all required worker SQL functions were created")
 
     def load_notify_sql(self, connection: Connection, force: bool = False) -> None:
-        """Load notify-related SQL functions. Matches Go LoadNotifySql."""
+        """
+        Load notify-related SQL functions. Matches Go LoadNotifySql.
+
+        :param connection: The Psycopg 3 connection object.
+        :param force: If True, forces reloading even if functions exist.
+        :raises RuntimeError: If not all required notify SQL functions were created.
+        """
         # Check if functions already exist (unless force=True)
         if not force:
-            if self._check_functions(connection, self.NOTIFY_FUNCTIONS):
+            if self.check_functions(connection, self.NOTIFY_FUNCTIONS):
                 return
 
         # Load the SQL file
         notify_sql_path = os.path.join(self.sql_base_path, "notify.sql")
-        self._execute_sql_file(connection, notify_sql_path)
+        self.execute_sql_file(connection, notify_sql_path)
 
         # Verify functions were created
-        if not self._check_functions(connection, self.NOTIFY_FUNCTIONS):
+        if not self.check_functions(connection, self.NOTIFY_FUNCTIONS):
             raise RuntimeError("Not all required notify SQL functions were created")

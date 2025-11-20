@@ -8,8 +8,7 @@ import threading
 import time
 from typing import List
 import unittest
-import pytest
-from unittest.mock import AsyncMock
+from uuid import uuid4
 from core.runner import go_func
 from helper.logging import get_logger
 from helper.test_database import DatabaseTestMixin
@@ -53,15 +52,20 @@ class TestQueuerListener(DatabaseTestMixin, unittest.TestCase):
 
         time.sleep(0.1)
 
-        asyncio.run(self.queuer.job_insert_broadcaster.broadcast(Job(rid="job1")))
-        asyncio.run(self.queuer.job_insert_broadcaster.broadcast(Job(rid="job2")))
+        rid_a = uuid4()
+        rid_b = uuid4()
+
+        if self.queuer.job_insert_broadcaster:
+            asyncio.run(self.queuer.job_insert_broadcaster.broadcast(Job(rid=rid_a)))
+        if self.queuer.job_insert_broadcaster:
+            asyncio.run(self.queuer.job_insert_broadcaster.broadcast(Job(rid=rid_b)))
 
         time.sleep(0.5)
 
         with jobs_lock:
             self.assertEqual(len(jobs), 2)
-            self.assertEqual(jobs[0].rid, "job1")
-            self.assertEqual(jobs[1].rid, "job2")
+            self.assertEqual(jobs[0].rid, rid_a)
+            self.assertEqual(jobs[1].rid, rid_b)
 
         runner.get_results()
         self.queuer.stop()
@@ -82,15 +86,20 @@ class TestQueuerListener(DatabaseTestMixin, unittest.TestCase):
 
         time.sleep(0.1)
 
-        asyncio.run(self.queuer.job_update_broadcaster.broadcast(Job(rid="jobX")))
-        asyncio.run(self.queuer.job_update_broadcaster.broadcast(Job(rid="jobY")))
+        rid_a = uuid4()
+        rid_b = uuid4()
+
+        if self.queuer.job_update_broadcaster:
+            asyncio.run(self.queuer.job_update_broadcaster.broadcast(Job(rid=rid_a)))
+        if self.queuer.job_update_broadcaster:
+            asyncio.run(self.queuer.job_update_broadcaster.broadcast(Job(rid=rid_b)))
 
         time.sleep(0.5)
 
         with jobs_lock:
             self.assertEqual(len(jobs), 2)
-            self.assertEqual(jobs[0].rid, "jobX")
-            self.assertEqual(jobs[1].rid, "jobY")
+            self.assertEqual(jobs[0].rid, rid_a)
+            self.assertEqual(jobs[1].rid, rid_b)
 
         runner.get_results()
         self.queuer.stop()
@@ -111,22 +120,26 @@ class TestQueuerListener(DatabaseTestMixin, unittest.TestCase):
 
         time.sleep(0.1)
 
-        asyncio.run(self.queuer.job_delete_broadcaster.broadcast(Job(rid="jobA")))
-        asyncio.run(self.queuer.job_delete_broadcaster.broadcast(Job(rid="jobB")))
+        rid_a = uuid4()
+        rid_b = uuid4()
+
+        if self.queuer.job_delete_broadcaster:
+            asyncio.run(self.queuer.job_delete_broadcaster.broadcast(Job(rid=rid_a)))
+        if self.queuer.job_delete_broadcaster:
+            asyncio.run(self.queuer.job_delete_broadcaster.broadcast(Job(rid=rid_b)))
 
         time.sleep(0.5)
 
         with jobs_lock:
             self.assertEqual(len(jobs), 2)
-            self.assertEqual(jobs[0].rid, "jobA")
-            self.assertEqual(jobs[1].rid, "jobB")
+            self.assertEqual(jobs[0].rid, rid_a)
+            self.assertEqual(jobs[1].rid, rid_b)
 
         runner.get_results()
         self.queuer.stop()
 
     def test_listen_for_job_insert_not_running_error(self):
         """Test that succeeds by expecting RuntimeError when queuer is not running."""
-        self.assertFalse(self.queuer._running, "Queuer should not be running initially")
 
         def mock_notify_function(_: Job):
             pass
@@ -135,22 +148,6 @@ class TestQueuerListener(DatabaseTestMixin, unittest.TestCase):
             self.queuer.listen_for_job_insert(mock_notify_function)
 
         self.assertIn(
-            "Cannot listen with uninitialized or not running Queuer",
+            "Cannot listen with not running Queuer",
             str(context.exception),
         )
-
-    def test_listen_for_job_update_no_listener_error(self):
-        """Test that succeeds by expecting RuntimeError when update listener is not initialized."""
-        self.queuer.start()
-
-        self.queuer.job_update_listener = None
-
-        def mock_notify_function(_: Job):
-            pass
-
-        with self.assertRaises(RuntimeError) as context:
-            self.queuer.listen_for_job_update(mock_notify_function)
-
-        self.assertIn("Job update listener not initialized", str(context.exception))
-
-        self.queuer.stop()

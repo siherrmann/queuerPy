@@ -3,6 +3,7 @@ Tests for Worker model.
 Mirrors Go's model/worker_test.go functionality.
 """
 
+from typing import Any, Dict, List
 import unittest
 
 from model.worker import Worker, new_worker, new_worker_with_options, WorkerStatus
@@ -15,7 +16,7 @@ class TestWorker(unittest.TestCase):
     def test_new_worker(self):
         """Test NewWorker function with various parameters."""
 
-        test_cases = [
+        test_cases: List[Dict[str, Any]] = [
             {
                 "name": "Valid worker",
                 "worker_name": "ExampleWorker",
@@ -82,7 +83,7 @@ class TestWorker(unittest.TestCase):
     def test_new_worker_with_options(self):
         """Test NewWorkerWithOptions function with various parameters."""
 
-        test_cases = [
+        test_cases: List[Dict[str, Any]] = [
             {
                 "name": "Valid worker with options",
                 "worker_name": "ExampleWorker",
@@ -194,8 +195,7 @@ class TestWorker(unittest.TestCase):
             available_tasks=["task1", "task2"],
         )
 
-        worker_dict = worker.to_dict()
-
+        worker_dict: Dict[str, Any] = worker.to_dict()
         self.assertEqual(worker_dict["name"], "test_worker")
         self.assertEqual(worker_dict["max_concurrency"], 5)
         self.assertIsNotNone(worker_dict["options"])

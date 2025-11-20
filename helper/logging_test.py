@@ -4,9 +4,7 @@ Test cases for logging utilities.
 
 import io
 import logging
-import sys
 import unittest
-from unittest.mock import patch, Mock
 
 from helper.logging import ColorFormatter, QueuerLogger, get_logger, setup_logging
 
@@ -222,8 +220,6 @@ class TestLoggerFunctions(unittest.TestCase):
 
     def test_setup_logging_sets_global(self):
         """Test that setup_logging sets global logger."""
-        original_logger = get_logger()
-
         new_logger = setup_logging(name="global_test")
         current_logger = get_logger("global_test")
 

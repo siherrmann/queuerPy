@@ -32,7 +32,7 @@ class Job:
 
     # Core identifiers - set automatically
     id: int = 0
-    rid: UUID = field(default_factory=uuid4)
+    rid: UUID = uuid4()
 
     # Worker association
     worker_id: int = 0
@@ -40,7 +40,7 @@ class Job:
 
     # Job definition
     task_name: str = ""
-    parameters: List[Any] = field(default_factory=list)
+    parameters: List[Any] = field(default_factory=lambda: [])
     options: Optional[Options] = None
 
     # Job state
@@ -49,14 +49,14 @@ class Job:
     started_at: Optional[datetime] = None
     schedule_count: int = 0
     attempts: int = 0
-    results: List[Any] = field(default_factory=list)
+    results: List[Any] = field(default_factory=lambda: [])
     error: Optional[str] = None
 
     # Timestamps - set automatically
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert job to dictionary for serialization."""
         return {
             "id": self.id,
@@ -99,7 +99,7 @@ class Job:
             return datetime.fromisoformat(datetime_str.split(".")[0])
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Job":
+    def from_dict(cls, data: Dict[str, Any]) -> "Job":
         """Create job from dictionary."""
         job: Job = cls()
         job.id = data.get("id", 0)
@@ -180,7 +180,9 @@ class Job:
 
 
 def new_job(
-    task: Union[Callable, str], options: Optional[Options] = None, *parameters
+    task: Union[Callable[..., Any], str],
+    options: Optional[Options] = None,
+    *parameters: Any,
 ) -> Job:
     """
     Create a new job from a task function or task name.
@@ -201,10 +203,8 @@ def new_job(
     # Handle both callable tasks and string task names
     if callable(task):
         task_name: str = get_task_name_from_interface(task)
-    elif isinstance(task, str):
-        task_name: str = task
     else:
-        raise TypeError("task must be callable or a string task name")
+        task_name: str = task
 
     if not task_name or len(task_name) > 100:
         raise ValueError("task name must have a length between 1 and 100")

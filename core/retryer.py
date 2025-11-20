@@ -5,31 +5,17 @@ This module provides retry functionality mirroring the Go implementation
 for reliable task execution with various backoff strategies.
 """
 
-import time
 import logging
 import sys
 import os
 import asyncio
 import inspect
-from typing import Callable, Optional, Any
+from typing import Any, Callable, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    from model.options_on_error import OnError, RetryBackoff
-except ImportError:
-    # Fallback if model doesn't exist yet
-    class OnError:
-        def __init__(self):
-            self.max_retries = 0
-            self.retry_delay = 0.0
-            self.retry_backoff = "none"
-
-    class RetryBackoff:
-        NONE = "none"
-        LINEAR = "linear"
-        EXPONENTIAL = "exponential"
+from model.options_on_error import OnError, RetryBackoff
 
 
 # Configure logging
@@ -39,15 +25,12 @@ logger = logging.getLogger(__name__)
 class Retryer:
     """Simple retryer mirroring Go's Retryer implementation."""
 
-    def __init__(self, function: Callable, options: OnError):
+    def __init__(self, function: Callable[..., Any], options: Optional[OnError]):
         """Initialize the retryer.
 
-        Args:
-            function: The function to execute with retries (can be sync or async)
-            options: OnError options for retry behavior
-
-        Raises:
-            ValueError: If options are invalid
+        :param function: The function to execute with retries (can be sync or async)
+        :param options: OnError options for retry behavior
+        :raises ValueError: If options are invalid
         """
         if options is None or options.max_retries <= 0 or options.retry_delay < 0:
             raise ValueError("No valid retry options provided")
@@ -69,8 +52,7 @@ class Retryer:
         - RETRY_BACKOFF_LINEAR: Increases the sleep duration linearly by the initial delay.
         - RETRY_BACKOFF_EXPONENTIAL: Doubles the sleep duration after each retry.
 
-        Returns:
-            None if successful, Exception if all retries failed
+        :returns: The last exception if all retries fail, otherwise None on success.
         """
         last_error: Optional[Exception] = None
 

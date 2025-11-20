@@ -4,15 +4,11 @@ Threadsafe Runner - Go-like async task execution with result channel.
 
 import multiprocessing
 import threading
-import time
 import inspect
 import asyncio
-import logging
-import os
 import traceback
 import queue
-from datetime import timedelta
-from typing import Callable, Any, Dict, Optional, Tuple, Union
+from typing import Callable, Any, Optional, Union
 
 from helper.logging import get_logger
 
@@ -31,24 +27,22 @@ class Runner(multiprocessing.Process):
 
     def __init__(
         self,
-        task: Callable,
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-        name_prefix: str = "Runner",
+        task: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
     ):
         """
         Initializes the Runner process.
 
         :param task: The synchronous or asynchronous function to execute.
         :param args: Arguments to pass to the task function.
-        :param name_prefix: Prefix for the process name (e.g., "Job-Runner").
         """
-        super().__init__(name=f"{name_prefix}-{task.__name__}", daemon=True)
+        super().__init__(name=task.__name__, daemon=True)
         self.task = task
         self.args = args
         self.kwargs = kwargs
         self.is_async = inspect.iscoroutinefunction(task)
-        self._result_queue: multiprocessing.Queue = multiprocessing.Queue(1)
+        self._result_queue: multiprocessing.Queue[Any] = multiprocessing.Queue(1)
 
     def go(self):
         """Starts the Runner process in the background."""
@@ -144,24 +138,22 @@ class SmallRunner(threading.Thread):
 
     def __init__(
         self,
-        task: Callable,
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-        name_prefix: str = "SmallRunner",
+        task: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
     ):
         """
         Initializes the SmallRunner thread.
 
         :param task: The synchronous or asynchronous function to execute.
         :param args: Arguments to pass to the task function.
-        :param name_prefix: Prefix for the thread name (e.g., "Job-SmallRunner").
         """
-        super().__init__(name=f"{name_prefix}-{task.__name__}", daemon=True)
+        super().__init__(name=task.__name__, daemon=True)
         self.task = task
         self.args = args
         self.kwargs = kwargs
         self.is_async = inspect.iscoroutinefunction(task)
-        self._result_queue: queue.Queue = queue.Queue(maxsize=1)
+        self._result_queue: queue.Queue[Any] = queue.Queue(maxsize=1)
 
     def go(self):
         """Starts the SmallRunner thread in the background."""
@@ -261,7 +253,7 @@ class SmallRunner(threading.Thread):
 
 
 def go_func(
-    func: Callable, use_mp: bool = True, *args, **kwargs
+    func: Callable[..., Any], use_mp: bool = True, *args: Any, **kwargs: Any
 ) -> Union[Runner, SmallRunner]:
     """
     Go-like async function execution factory. Selects the appropriate runner.
@@ -274,9 +266,9 @@ def go_func(
     :returns: A running Runner or SmallRunner instance.
     """
     if use_mp:
-        runner = Runner(func, args, kwargs)
+        runner = Runner(func, *args, **kwargs)
     else:
-        runner = SmallRunner(func, args, kwargs)
+        runner = SmallRunner(func, *args, **kwargs)
 
     runner.go()
     return runner

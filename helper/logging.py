@@ -5,7 +5,7 @@ Mirrors Go's helper/prettyLog.go with Python logging enhancements.
 
 import logging
 import sys
-from typing import Optional, TextIO
+from typing import Any, Callable, Optional, TextIO
 from datetime import datetime
 
 
@@ -26,7 +26,12 @@ class ColorFormatter(logging.Formatter):
     }
 
     def __init__(self, use_colors: bool = True, include_timestamp: bool = True):
-        """Initialize the color formatter."""
+        """
+        Initialize the color formatter.
+
+        :param use_colors: Whether to use colors in the output.
+        :param include_timestamp: Whether to include timestamps in log messages.
+        """
         self.use_colors = use_colors and sys.stdout.isatty()
         self.include_timestamp = include_timestamp
 
@@ -38,16 +43,17 @@ class ColorFormatter(logging.Formatter):
         super().__init__(fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format the log record with colors."""
-        # Format the base message
+        """
+        Format the log record with colors.
+
+        :param record: The log record to format.
+        :returns: The formatted log message string.
+        """
         formatted = super().format(record)
 
-        # Add colors if enabled
         if self.use_colors and record.levelname in self.COLORS:
             color = self.COLORS[record.levelname]
             reset = self.COLORS["RESET"]
-
-            # Color only the level name
             parts = formatted.split(": ", 1)
             if len(parts) == 2:
                 level_part, message_part = parts
@@ -69,7 +75,14 @@ class QueuerLogger:
         use_colors: bool = True,
         stream: Optional[TextIO] = None,
     ):
-        """Initialize the queuer logger."""
+        """
+        Initialize the queuer logger.
+
+        :param name: Logger name.
+        :param level: Logging level.
+        :param use_colors: Whether to use colored output.
+        :param stream: Output stream (defaults to sys.stdout).
+        """
         self.logger = logging.getLogger(name)
         self.logger.setLevel(level)
 
@@ -85,34 +98,65 @@ class QueuerLogger:
         self.logger.addHandler(handler)
         self.logger.propagate = False
 
-    def debug(self, message: str, **kwargs) -> None:
-        """Log debug message with optional context."""
-        self._log_with_context(logging.DEBUG, message, **kwargs)
+    def debug(self, message: str, **kwargs: Any):
+        """
+        Log debug message with optional context.
 
-    def info(self, message: str, **kwargs) -> None:
-        """Log info message with optional context."""
-        self._log_with_context(logging.INFO, message, **kwargs)
+        :param message: The log message.
+        :param kwargs: Additional context to include in the log.
+        """
+        self.log_with_context(logging.DEBUG, message, **kwargs)
 
-    def warning(self, message: str, **kwargs) -> None:
-        """Log warning message with optional context."""
-        self._log_with_context(logging.WARNING, message, **kwargs)
+    def info(self, message: str, **kwargs: Any):
+        """
+        Log info message with optional context.
 
-    def error(self, message: str, error: Optional[Exception] = None, **kwargs) -> None:
-        """Log error message with optional exception and context."""
+        :param message: The log message.
+        :param kwargs: Additional context to include in the log.
+        """
+        self.log_with_context(logging.INFO, message, **kwargs)
+
+    def warning(self, message: str, **kwargs: Any):
+        """
+        Log warning message with optional context.
+
+        :param message: The log message.
+        :param kwargs: Additional context to include in the log.
+        """
+        self.log_with_context(logging.WARNING, message, **kwargs)
+
+    def error(self, message: str, error: Optional[Exception] = None, **kwargs: Any):
+        """
+        Log error message with optional exception and context.
+
+        :param message: The log message.
+        :param error: Optional exception to include in the log.
+        :param kwargs: Additional context to include in the log.
+        """
         if error:
             message = f"{message}: {error}"
-        self._log_with_context(logging.ERROR, message, **kwargs)
+        self.log_with_context(logging.ERROR, message, **kwargs)
 
-    def critical(
-        self, message: str, error: Optional[Exception] = None, **kwargs
-    ) -> None:
-        """Log critical message with optional exception and context."""
+    def critical(self, message: str, error: Optional[Exception] = None, **kwargs: Any):
+        """
+        Log critical message with optional exception and context.
+
+        :param message: The log message.
+        :param error: Optional exception to include in the log.
+        :param kwargs: Additional context to include in the log.
+        """
         if error:
             message = f"{message}: {error}"
-        self._log_with_context(logging.CRITICAL, message, **kwargs)
+        self.log_with_context(logging.CRITICAL, message, **kwargs)
 
-    def _log_with_context(self, level: int, message: str, **kwargs) -> None:
-        """Log message with additional context information."""
+    def log_with_context(self, level: int, message: str, **kwargs: Any):
+        """
+        Log message with additional context information.
+
+        :param level: Logging level.
+        :param message: The log message.
+        :param kwargs: Additional context to include in the log.
+        """
         if kwargs:
             context_parts = [f"{k}={v}" for k, v in kwargs.items()]
             context_str = " | " + " ".join(context_parts)
@@ -120,7 +164,7 @@ class QueuerLogger:
 
         self.logger.log(level, message)
 
-    def set_level(self, level: int) -> None:
+    def set_level(self, level: int):
         """Set the logging level."""
         self.logger.setLevel(level)
 
@@ -130,7 +174,12 @@ _default_logger: Optional[QueuerLogger] = None
 
 
 def get_logger(name: str = "queuer") -> QueuerLogger:
-    """Get or create a logger instance."""
+    """
+    Get or create a logger instance.
+
+    :param name: Logger name.
+    :returns: QueuerLogger instance.
+    """
     global _default_logger
     if _default_logger is None or _default_logger.logger.name != name:
         _default_logger = QueuerLogger(name)
@@ -142,7 +191,11 @@ def setup_logging(
 ) -> QueuerLogger:
     """
     Setup logging for the queuer application.
-    Returns configured logger instance.
+
+    :param level: Logging level.
+    :param use_colors: Whether to use colors in logs.
+    :param name: Logger name.
+    :returns: Configured QueuerLogger instance.
     """
     logger = QueuerLogger(name, level, use_colors)
 
@@ -153,67 +206,6 @@ def setup_logging(
     return logger
 
 
-# Convenience functions for direct logging
-def debug(message: str, **kwargs) -> None:
-    """Log debug message using default logger."""
-    get_logger().debug(message, **kwargs)
-
-
-def info(message: str, **kwargs) -> None:
-    """Log info message using default logger."""
-    get_logger().info(message, **kwargs)
-
-
-def warning(message: str, **kwargs) -> None:
-    """Log warning message using default logger."""
-    get_logger().warning(message, **kwargs)
-
-
-def error(message: str, error: Optional[Exception] = None, **kwargs) -> None:
-    """Log error message using default logger."""
-    get_logger().error(message, error, **kwargs)
-
-
-def critical(message: str, error: Optional[Exception] = None, **kwargs) -> None:
-    """Log critical message using default logger."""
-    get_logger().critical(message, error, **kwargs)
-
-
-# Context manager for structured logging
-class LogContext:
-    """
-    Context manager for adding context to log messages.
-    Automatically adds context information to all log messages within the block.
-    """
-
-    def __init__(self, logger: QueuerLogger, **context):
-        """Initialize log context."""
-        self.logger = logger
-        self.context = context
-        self.original_log_method = None
-
-    def __enter__(self):
-        """Enter the log context."""
-        # Store original log method
-        self.original_log_method = self.logger._log_with_context
-
-        # Create new log method that includes context
-        def enhanced_log(level: int, message: str, **kwargs):
-            # Merge context with message kwargs
-            merged_context = {**self.context, **kwargs}
-            return self.original_log_method(level, message, **merged_context)
-
-        # Replace the log method
-        self.logger._log_with_context = enhanced_log
-        return self.logger
-
-    def __exit__(self):
-        """Exit the log context."""
-        # Restore original log method
-        if self.original_log_method:
-            self.logger._log_with_context = self.original_log_method
-
-
 # Performance logging utilities
 class PerformanceLogger:
     """Logger for performance metrics and timing."""
@@ -222,7 +214,7 @@ class PerformanceLogger:
         self.logger = logger
         self.start_time: Optional[datetime] = None
 
-    def start_timer(self, operation: str) -> None:
+    def start_timer(self, operation: str):
         """Start timing an operation."""
         self.start_time = datetime.now()
         self.logger.debug(f"Started {operation}")
@@ -234,7 +226,9 @@ class PerformanceLogger:
             return 0.0
 
         duration = (datetime.now() - self.start_time).total_seconds()
-        self.logger.info(f"Completed {operation}", duration_seconds=duration)
+        self.logger.info(
+            f"Completed {operation}", duration_seconds=duration, operation=operation
+        )
         self.start_time = None
         return duration
 
@@ -248,8 +242,8 @@ def time_operation(operation: str, logger: Optional[QueuerLogger] = None):
         pass
     """
 
-    def decorator(func):
-        def wrapper(*args, **kwargs):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             perf_logger = PerformanceLogger(logger or get_logger())
             perf_logger.start_timer(operation)
             try:

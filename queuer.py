@@ -17,27 +17,22 @@ from uuid import UUID
 
 # Local imports - database components
 from core.ticker import Ticker
-from database.db_job import JobDBHandler
-from database.db_worker import WorkerDBHandler
 from database.db_listener import QueuerListener, new_queuer_db_listener
 
 # Local imports - core components
-from core.broadcaster import Broadcaster, new_broadcaster
 from core.listener import Listener
 from core.runner import Runner, SmallRunner
 
 from core.runner import Runner, go_func
 
 # Local imports - model classes
-from helper.error import QueuerError
 from helper.logging import get_logger
 from model.job import Job, JobStatus
-from model.task import Task
 from model.worker import Worker, new_worker, new_worker_with_options, WorkerStatus
 from model.options_on_error import OnError
 
 # Local imports - helper components
-from helper.database import Database, new_database, DatabaseConfiguration
+from helper.database import DatabaseConfiguration
 
 # Local imports - mixins
 from queuer_job import QueuerJobMixin
@@ -61,7 +56,7 @@ def new_queuer(name: str, max_concurrency: int, *options: OnError) -> "Queuer":
 def new_queuer_with_db(
     name: str,
     max_concurrency: int,
-    encryption_key: Optional[str] = None,
+    encryption_key: str = "",
     db_config: Optional[DatabaseConfiguration] = None,
     *options: OnError,
 ) -> "Queuer":
@@ -79,7 +74,10 @@ def new_queuer_with_db(
 
 
 class Queuer(
-    QueuerJobMixin, QueuerTaskMixin, QueuerNextIntervalMixin, QueuerListenerMixin
+    QueuerJobMixin,
+    QueuerTaskMixin,
+    QueuerNextIntervalMixin,
+    QueuerListenerMixin,
 ):
     """
     Main queuing system class.
@@ -113,14 +111,30 @@ class Queuer(
         If any error occurs during initialization, it logs a panic error and exits the program.
         It returns a pointer to the newly created Queuer instance.
         """
+        super().__init__()
+
         # Store name and concurrency for access
         self.name: str = name
         self.max_concurrency: int = max_concurrency
 
         # Context management - will be set in start()
-        self._running: bool = False
         self._stopped: threading.Event = threading.Event()
         self._cancel_event: Optional[asyncio.Event] = None
+
+        # Configuration
+        self.job_poll_interval: timedelta = timedelta(minutes=5)
+        self.retention_archive: timedelta = timedelta(days=30)
+
+        # Active runners (jobs currently executing)
+        self.active_runners: Dict[UUID, Runner] = {}
+
+        # Database listeners (will be initialized in start())
+        self.job_db_listener: Optional[QueuerListener] = None
+        self.job_archive_db_listener: Optional[QueuerListener] = None
+
+        # Database listener runners (track go_func runners for cleanup)
+        self.job_db_listener_runner: Optional[SmallRunner] = None
+        self.job_archive_db_listener_runner: Optional[SmallRunner] = None
 
         # Database configuration
         if db_config is not None:
@@ -128,23 +142,10 @@ class Queuer(
         else:
             self.db_config: DatabaseConfiguration = DatabaseConfiguration.from_env()
 
-        # Database connection
-        self.database: Database = new_database("queuer", self.db_config, logger)
-        self.DB = self.database.instance
-
-        # Database handlers
-        self.db_job: JobDBHandler = JobDBHandler(
-            self.database, self.db_config.with_table_drop, encryption_key
+        super().initialise(
+            db_config=self.db_config,
+            encryption_key=encryption_key,
         )
-        self.db_worker: WorkerDBHandler = WorkerDBHandler(
-            self.database, self.db_config.with_table_drop
-        )
-
-        # Configuration
-        self.job_poll_interval: timedelta = timedelta(
-            minutes=5
-        )  # Backup polling - listeners handle real-time processing
-        self.retention_archive: timedelta = timedelta(days=30)
 
         # Create and insert worker
         if options:
@@ -161,44 +162,16 @@ class Queuer(
             f"Queuer with worker created: {new_worker_obj.name} (RID: {self.worker.rid})"
         )
 
-        # Active runners (jobs currently executing)
-        self.active_runners: Dict[UUID, Runner] = {}
-
-        # Tasks storage and next interval functions
-        self.tasks: Dict[str, Task] = {}
-        self.next_interval_funcs: Dict[str, Callable] = {}
-
-        # Database listeners (will be initialized in start())
-        self.job_db_listener: Optional[QueuerListener] = None
-        self.job_archive_db_listener: Optional[QueuerListener] = None
-
-        # Database listener runners (track go_func runners for cleanup)
-        self.job_db_listener_runner: Optional[SmallRunner] = None
-        self.job_archive_db_listener_runner: Optional[SmallRunner] = None
-
-        # Job broadcasters and listeners (will be initialized in start())
-        self.job_insert_broadcaster: Optional[Broadcaster] = None
-        self.job_update_broadcaster: Optional[Broadcaster] = None
-        self.job_delete_broadcaster: Optional[Broadcaster] = None
-
-        self.job_insert_listener: Optional[Listener] = None
-        self.job_update_listener: Optional[Listener] = None
-        self.job_delete_listener: Optional[Listener] = None
-
-        # Tickers (will be initialized in start())
-        self._heartbeat_ticker: Optional[Any] = None
-        self._poll_job_ticker: Optional[Any] = None
-
     def start(self):
         """Start the queuer."""
-        if self._running:
+        if self.running:
             raise RuntimeError("Queuer is already running")
 
         # No need to verify event loop with multiprocessing-based Runner
 
         # Set up context
-        self._running = True
-        self._stopped.clear()  # Clear the stopped flag
+        self.running = True
+        self._stopped.clear()
         self._cancel_event = asyncio.Event()
 
         # Set up database listeners
@@ -216,31 +189,40 @@ class Queuer(
         # Broadcasters for job updates and deletes
         # Use singleton broadcasters so all queuer instances share the same broadcasters
         try:
-            self.job_insert_broadcaster = new_broadcaster("job.INSERT")
-            self.job_insert_listener = Listener[Job](self.job_insert_broadcaster)
-
-            self.job_update_broadcaster = new_broadcaster("job.UPDATE")
-            self.job_update_listener = Listener[Job](self.job_update_broadcaster)
-
-            self.job_delete_broadcaster = new_broadcaster("job.DELETE")
-            self.job_delete_listener = Listener[Job](self.job_delete_broadcaster)
+            if self.job_insert_broadcaster:
+                self.job_insert_listener = Listener[Job](self.job_insert_broadcaster)
+            if self.job_update_broadcaster:
+                self.job_update_listener = Listener[Job](self.job_update_broadcaster)
+            if self.job_delete_broadcaster:
+                self.job_delete_listener = Listener[Job](self.job_delete_broadcaster)
         except Exception as e:
             logger.error(f"Error creating job broadcasters: {e}")
             raise RuntimeError(f"Error creating job broadcasters: {e}")
 
-        # Update worker status to running
+        # Ensure database is connected (reconnect if it was closed by a previous stop())
+        try:
+            if not self.database.instance:
+                logger.debug("Database connection was closed, reconnecting...")
+                self.database.connect_to_database()
+        except Exception as e:
+            logger.error(f"Error reconnecting to database: {e}")
+            raise RuntimeError(f"Error reconnecting to database: {e}")
+
+        # Update worker status to running (or recreate if it doesn't exist)
         try:
             with self.worker_mutex:
                 self.worker.status = WorkerStatus.RUNNING
-                self.worker = self.db_worker.update_worker(self.worker)
+                worker_updated = self.db_worker.update_worker(self.worker)
+                if not worker_updated:
+                    raise Exception("Could not update worker to RUNNING")
+
+                self.worker = worker_updated
         except Exception as e:
             logger.error(f"Error updating worker status to running: {e}")
             raise RuntimeError(f"Error updating worker status to running: {e}")
 
         # Start background tasks
         self._start_listeners()
-
-        # Wait for listeners to be ready (with timeout)
         self._wait_for_listeners_ready()
 
         self._start_heartbeat_ticker()
@@ -254,15 +236,15 @@ class Queuer(
         was_running = getattr(self, "_running", False)
 
         # Stop tickers first to prevent new work from being queued
-        if self._heartbeat_ticker:
+        if self.heartbeat_ticker:
             try:
-                self._heartbeat_ticker.stop()
+                self.heartbeat_ticker.stop()
             except Exception as e:
                 logger.warning(f"Error stopping heartbeat ticker: {e}")
 
-        if self._poll_job_ticker:
+        if self.poll_job_ticker:
             try:
-                self._poll_job_ticker.stop()
+                self.poll_job_ticker.stop()
             except Exception as e:
                 logger.warning(f"Error stopping poll job ticker: {e}")
 
@@ -307,8 +289,9 @@ class Queuer(
             try:
                 with self.worker_mutex:
                     self.worker.status = WorkerStatus.STOPPED
-                    self.worker = self.db_worker.update_worker(self.worker)
-                    worker_rid = self.worker.rid
+                    worker_updated = self.db_worker.update_worker(self.worker)
+                    if worker_updated:
+                        worker_rid = self.worker.rid
             except Exception as e:
                 logger.error(f"Error updating worker status to stopped: {e}")
         else:
@@ -330,7 +313,7 @@ class Queuer(
                 logger.warning(f"Error setting cancel event: {e}")
 
         # Signal that we're stopping
-        self._running = False
+        self.running = False
         self._stopped.set()
 
         # Cancel all active runners - similar to Go's job cancellation
@@ -388,17 +371,11 @@ class Queuer(
             if broadcaster_count > 0:
                 logger.debug(f"Cleaned up {broadcaster_count} broadcasters")
 
-            # Clear broadcaster references
-            self.job_insert_broadcaster = None
-            self.job_update_broadcaster = None
-            self.job_delete_broadcaster = None
-
         except Exception as e:
             logger.warning(f"Error during broadcaster cleanup: {e}")
 
         # Cleanup AsyncIO resources
         try:
-            # Cancel any pending async tasks
             try:
                 loop = asyncio.get_running_loop()
                 pending_tasks = [
@@ -408,9 +385,7 @@ class Queuer(
                     logger.debug(f"Cancelling {len(pending_tasks)} pending async tasks")
                     for task in pending_tasks:
                         task.cancel()
-                    # Don't wait for cancellation to avoid hanging
             except RuntimeError:
-                # No running event loop, which is fine
                 pass
 
             # Clear the cancel event
@@ -419,27 +394,23 @@ class Queuer(
         except Exception as e:
             logger.warning(f"Error during AsyncIO cleanup: {e}")
 
-            # Only close main database connection if we were running
-            # This allows reusing the queuer after stop() if it was never started
-            if hasattr(self, "database") and self.database:
-                try:
-                    logger.info(
-                        f"Closing main database connection for queuer '{self.name}'"
-                    )
-                    self.database.close()
-                except Exception as e:
-                    logger.error(f"Error closing main database connection: {e}")
+        if self.database:
+            try:
+                logger.info(f"Closing database '{self.name}'")
+                self.database.close()
+            except Exception as e:
+                logger.error(f"Error closing main database connection: {e}")
 
         logger.info(f"Queuer '{self.worker.name}' stopped")
 
     # Job notification listeners
-    async def _handle_job_notification(self, notification):
+    async def _handle_job_notification(self, notification: str):
         """
         Handle job database notifications.
 
         :param notification: The notification payload as a string
         """
-        if not self._running:
+        if not self.running:
             logger.warning(f"Queuer not running, ignoring job notification")
             return
 
@@ -468,7 +439,7 @@ class Queuer(
         except Exception as e:
             logger.error(f"Error handling job notification: {e}")
 
-    async def _handle_job_archive_notification(self, notification):
+    async def _handle_job_archive_notification(self, notification: str):
         """
         Handle job archive database notifications.
 
@@ -503,11 +474,13 @@ class Queuer(
         if self.job_db_listener:
             try:
                 logger.debug("Starting job listeners")
-                self.job_db_listener_runner = go_func(
+                job_runner = go_func(
                     self._start_job_listener,
                     False,
                     self._handle_job_notification,
                 )
+                if job_runner and isinstance(job_runner, SmallRunner):
+                    self.job_db_listener_runner = job_runner
             except Exception as e:
                 logger.error(f"Error starting job listener: {e}")
 
@@ -515,11 +488,13 @@ class Queuer(
         if self.job_archive_db_listener:
             try:
                 logger.debug("Starting job archive listeners")
-                self.job_archive_db_listener_runner = go_func(
+                archive_runner = go_func(
                     self._start_job_archive_listener,
                     False,
                     self._handle_job_archive_notification,
                 )
+                if archive_runner and isinstance(archive_runner, SmallRunner):
+                    self.job_archive_db_listener_runner = archive_runner
             except Exception as e:
                 logger.error(f"Error starting job archive listener: {e}")
 
@@ -538,16 +513,16 @@ class Queuer(
                 self.job_db_listener
                 and hasattr(self.job_db_listener, "connection")
                 and self.job_db_listener.connection is not None
-                and hasattr(self.job_db_listener, "_listening")
-                and self.job_db_listener._listening
+                and hasattr(self.job_db_listener, "listening")
+                and self.job_db_listener.listening
             )
 
             archive_ready = (
                 self.job_archive_db_listener
                 and hasattr(self.job_archive_db_listener, "connection")
                 and self.job_archive_db_listener.connection is not None
-                and hasattr(self.job_archive_db_listener, "_listening")
-                and self.job_archive_db_listener._listening
+                and hasattr(self.job_archive_db_listener, "listening")
+                and self.job_archive_db_listener.listening
             )
 
             if job_ready and archive_ready:
@@ -578,12 +553,12 @@ class Queuer(
 
     def _start_heartbeat_ticker(self):
         """Start heartbeat ticker using threading."""
-        self._heartbeat_ticker = Ticker(
+        self.heartbeat_ticker = Ticker(
             timedelta(seconds=30),
             self._heartbeat_func,
             use_mp=False,
         )
-        self._heartbeat_ticker.go()
+        self.heartbeat_ticker.go()
 
     def _poll_jobs_func(self):
         """Poll for jobs as backup to notification system."""
@@ -598,26 +573,30 @@ class Queuer(
         Start job polling ticker as backup mechanism.
         This provides a safety net in case notification-based processing fails.
         """
-        self._poll_job_ticker = Ticker(
+        self.poll_job_ticker = Ticker(
             self.job_poll_interval,
             self._poll_jobs_func,
             use_mp=False,
         )
-        self._poll_job_ticker.go()
+        self.poll_job_ticker.go()
 
     # Database listeners
-    async def _start_job_listener(self, handle_job_notification):
+    async def _start_job_listener(self, handle_job_notification: Callable[[str], Any]):
         """
         Start job database listener.
 
         :param handle_job_notification: The callback to handle job notifications
         """
-        await self.job_db_listener.listen(handle_job_notification)
+        if self.job_db_listener:
+            await self.job_db_listener.listen(handle_job_notification)
 
-    async def _start_job_archive_listener(self, handle_job_archive_notification):
+    async def _start_job_archive_listener(
+        self, handle_job_archive_notification: Callable[[str], Any]
+    ):
         """
         Start job archive database listener.
 
         :param handle_job_archive_notification: The callback to handle job archive notifications
         """
-        await self.job_archive_db_listener.listen(handle_job_archive_notification)
+        if self.job_archive_db_listener:
+            await self.job_archive_db_listener.listen(handle_job_archive_notification)

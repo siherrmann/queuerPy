@@ -4,16 +4,15 @@ Mirrors Go's database/dbJob.go with psycopg3 and references same SQL functions.
 """
 
 import json
-from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from uuid import UUID
-import psycopg
 from psycopg import Connection
 from psycopg.rows import dict_row
 
 from helper.database import Database
+from helper.error import QueuerError
 from helper.sql import SQLLoader, run_ddl
-from model.job import Job, JobStatus
+from model.job import Job
 from model.worker import Worker
 
 
@@ -25,32 +24,36 @@ class JobDBHandler:
 
     def __init__(
         self,
-        db_connection: Database,
+        db_connection: Optional[Database],
         with_table_drop: bool = False,
         encryption_key: str = "",
     ):
         """Initialize job database handler."""
         if db_connection is None:
-            raise ValueError("database connection is None")
-
+            raise ValueError("Database connection is None")
         self.db: Database = db_connection
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         self.encryption_key: str = encryption_key
 
         # Load SQL functions using helper.sql
         connection: Connection = self.db.instance
         sql_loader: SQLLoader = SQLLoader()
 
-        sql_loader.load_notify_sql(
-            connection, force=with_table_drop
-        )  # Load notify function first
-
+        sql_loader.load_notify_sql(connection, force=with_table_drop)
         sql_loader.load_job_sql(connection, force=with_table_drop)
-
-        # Always call create_table - it's safe as it uses IF NOT EXISTS and OR REPLACE
         self.create_table()
 
     def check_tables_existence(self) -> bool:
-        """Check if job tables exist."""
+        """
+        Check if job tables exist.
+
+        :return: True if job table exists, False otherwise.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor() as cur:
             cur.execute(
                 """
@@ -64,20 +67,31 @@ class JobDBHandler:
             result = cur.fetchone()
             return result[0] if result else False
 
-    def create_table(self) -> None:
+    def create_table(self):
         """Create job table using SQL init function."""
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         run_ddl(self.db.instance, "SELECT init_job();")
 
-    def drop_tables(self) -> None:
+    def drop_tables(self):
         """Drop job tables with DDL deadlock protection."""
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         run_ddl(self.db.instance, "DROP TABLE IF EXISTS job_archive CASCADE;")
         run_ddl(self.db.instance, "DROP TABLE IF EXISTS job CASCADE;")
 
     def insert_job(self, job: Job) -> Job:
         """
         Insert a job into the database.
-        Mirrors Go's InsertJob method using direct INSERT statement.
+
+        :param job: Job instance to insert.
+        :return: Inserted Job instance.
         """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -105,11 +119,7 @@ class JobDBHandler:
                     json.dumps(job.options.to_dict()) if job.options else None,
                     job.task_name,
                     json.dumps(job.parameters),
-                    (
-                        job.status.value
-                        if isinstance(job.status, JobStatus)
-                        else job.status
-                    ),
+                    job.status,
                     job.scheduled_at,
                     job.schedule_count,
                     job.worker_rid,
@@ -133,6 +143,9 @@ class JobDBHandler:
         Insert a job within a transaction context.
         Placeholder method - mirrors Go's InsertJobTx method.
         TODO: Implement transaction-aware insert logic.
+
+        :param job: Job instance to insert.
+        :return: Inserted Job instance.
         """
         # For now, delegate to regular insert_job
         # In full implementation, this would handle explicit transaction context
@@ -143,10 +156,13 @@ class JobDBHandler:
         Insert multiple jobs in a batch operation.
         Placeholder method - mirrors Go's BatchInsertJobs method.
         TODO: Implement efficient batch insert logic.
+
+        :param jobs: List of Job instances to insert.
+        :return: List of inserted Job instances.
         """
         # For now, insert jobs one by one
         # In full implementation, this would use batch SQL operations
-        result_jobs = []
+        result_jobs: List[Job] = []
         for job in jobs:
             result_jobs.append(self.insert_job(job))
         return result_jobs
@@ -154,9 +170,13 @@ class JobDBHandler:
     def update_jobs_initial(self, worker: Worker) -> List[Job]:
         """
         Update jobs for initial processing.
-        Mirrors Go's UpdateJobsInitial method.
-        Uses the update_job_initial SQL function.
+
+        :param worker: Worker instance for which to update jobs.
+        :return: List of updated Job instances.
         """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -165,7 +185,7 @@ class JobDBHandler:
                 (worker.id,),
             )
 
-            jobs = []
+            jobs: List[Job] = []
             for row in cur.fetchall():
                 jobs.append(Job.from_row(row))
 
@@ -174,12 +194,15 @@ class JobDBHandler:
     def update_job_final(self, job: Job) -> Job:
         """
         Update job with final status and results.
-        Mirrors Go's UpdateJobFinal method.
-        """
-        with self.db.instance.cursor(row_factory=dict_row) as cur:
-            # Convert results to JSON string for JSONB parameter
-            results_param = json.dumps(job.results)
 
+        :param job: Job instance to update.
+        :return: Updated Job instance.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
+        with self.db.instance.cursor(row_factory=dict_row) as cur:
+            results_param = json.dumps(job.results)
             if self.encryption_key:
                 cur.execute(
                     """
@@ -238,7 +261,6 @@ class JobDBHandler:
             row = cur.fetchone()
             if row:
                 job_result = Job.from_row(row)
-                # Commit the transaction to ensure the job is properly archived
                 self.db.instance.commit()
                 return job_result
             else:
@@ -247,38 +269,46 @@ class JobDBHandler:
     def update_stale_jobs(self) -> int:
         """
         Update stale jobs to CANCELLED status where the assigned worker is STOPPED.
-        Mirrors Go's UpdateStaleJobs method.
+
+        :return: Number of jobs updated.
         """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor() as cur:
             try:
                 cur.execute(
-                    """
-                    UPDATE job 
-                    SET status = %s 
-                    WHERE status NOT IN (%s, %s, %s)
-                      AND worker_rid IN (
-                          SELECT rid 
-                          FROM worker 
-                          WHERE status = %s
-                      );
-                """,
+                    "SELECT update_stale_jobs(%s, %s, %s, %s, %s);",
                     ("CANCELLED", "SUCCEEDED", "CANCELLED", "FAILED", "STOPPED"),
                 )
-                return cur.rowcount
+                result = cur.fetchone()
+                return result[0] if result else 0
             except Exception as e:
-                # If worker table doesn't exist, return 0 (no jobs updated)
-                if 'relation "worker" does not exist' in str(e):
-                    return 0
-                raise
+                raise QueuerError("update stale jobs", e)
 
-    def delete_job(self, rid: UUID) -> None:
-        """Delete a job by RID."""
+    def delete_job(self, rid: UUID):
+        """
+        Delete a job by RID.
+
+        :param rid: RID of the job to delete.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor() as cur:
             cur.execute("DELETE FROM job WHERE rid = %s;", (rid,))
         self.db.instance.commit()
 
     def select_job(self, rid: UUID) -> Optional[Job]:
-        """Select a job by RID. Mirrors Go's SelectJob method."""
+        """
+        Select a job by RID. Mirrors Go's SelectJob method.
+
+        :param rid: RID of the job to select.
+        :return: Job instance if found, else None.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -314,7 +344,16 @@ class JobDBHandler:
             return Job.from_row(row) if row else None
 
     def select_all_jobs(self, last_id: int = 0, entries: int = 100) -> List[Job]:
-        """Select all jobs with pagination."""
+        """
+        Select all jobs with pagination.
+
+        :param last_id: Last job ID from previous page.
+        :param entries: Number of entries to retrieve.
+        :return: List of Job instances.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -326,7 +365,7 @@ class JobDBHandler:
                 (last_id, entries),
             )
 
-            jobs = []
+            jobs: List[Job] = []
             for row in cur.fetchall():
                 jobs.append(Job.from_row(row))
 
@@ -335,7 +374,17 @@ class JobDBHandler:
     def select_all_jobs_by_worker_rid(
         self, worker_rid: UUID, last_id: int = 0, entries: int = 100
     ) -> List[Job]:
-        """Select all jobs for a specific worker."""
+        """
+        Select all jobs for a specific worker.
+
+        :param worker_rid: RID of the worker.
+        :param last_id: Last job ID from previous page.
+        :param entries: Number of entries to retrieve.
+        :return: List of Job instances.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -347,7 +396,7 @@ class JobDBHandler:
                 (worker_rid, last_id, entries),
             )
 
-            jobs = []
+            jobs: List[Job] = []
             for row in cur.fetchall():
                 jobs.append(Job.from_row(row))
 
@@ -359,7 +408,15 @@ class JobDBHandler:
         """
         Select all jobs filtered by search string. Mirrors Go's SelectAllJobsBySearch method.
         Searches across 'rid', 'worker_id', 'task_name', and 'status' fields.
+
+        :param search: Search string to filter jobs.
+        :param last_id: Last job ID from previous page.
+        :param entries: Number of entries to retrieve.
+        :return: List of Job instances.
         """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -412,13 +469,13 @@ class JobDBHandler:
                 ),
             )
 
-            jobs = []
+            jobs: List[Job] = []
             for row in cur.fetchall():
                 jobs.append(Job.from_row(row))
 
             return jobs
 
-    def add_retention_archive(self, days: int) -> None:
+    def add_retention_archive(self, days: int):
         """
         Add retention policy for archive cleanup.
         Placeholder method - mirrors Go's AddRetentionArchive method.
@@ -427,7 +484,7 @@ class JobDBHandler:
         # Placeholder implementation
         pass
 
-    def remove_retention_archive(self) -> None:
+    def remove_retention_archive(self):
         """
         Remove retention policy for archive cleanup.
         Placeholder method - mirrors Go's RemoveRetentionArchive method.
@@ -437,7 +494,15 @@ class JobDBHandler:
         pass
 
     def select_job_from_archive(self, rid: UUID) -> Optional[Job]:
-        """Select a job from archive by RID. Mirrors Go's SelectJobFromArchive method."""
+        """
+        Select a job from archive by RID. Mirrors Go's SelectJobFromArchive method.
+
+        :param rid: RID of the job to select.
+        :return: Job instance if found, else None.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -475,7 +540,16 @@ class JobDBHandler:
     def select_all_jobs_from_archive(
         self, last_id: int = 0, entries: int = 100
     ) -> List[Job]:
-        """Select all jobs from archive with pagination. Mirrors Go's SelectAllJobsFromArchive method."""
+        """
+        Select all jobs from archive with pagination. Mirrors Go's SelectAllJobsFromArchive method.
+
+        :param last_id: Last job ID from previous page.
+        :param entries: Number of entries to retrieve.
+        :return: List of Job instances.
+        """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -516,7 +590,7 @@ class JobDBHandler:
                 (self.encryption_key or "", last_id, last_id, entries),
             )
 
-            jobs = []
+            jobs: List[Job] = []
             for row in cur.fetchall():
                 jobs.append(Job.from_row(row))
 
@@ -528,7 +602,15 @@ class JobDBHandler:
         """
         Select all archived jobs filtered by search string. Mirrors Go's SelectAllJobsFromArchiveBySearch method.
         Searches across 'rid', 'worker_id', 'task_name', and 'status' fields.
+
+        :param search: Search string to filter jobs.
+        :param last_id: Last job ID from previous page.
+        :param entries: Number of entries to retrieve.
+        :return: List of Job instances.
         """
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
@@ -581,7 +663,7 @@ class JobDBHandler:
                 ),
             )
 
-            jobs = []
+            jobs: List[Job] = []
             for row in cur.fetchall():
                 jobs.append(Job.from_row(row))
 

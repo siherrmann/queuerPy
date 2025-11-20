@@ -7,7 +7,7 @@ import multiprocessing
 import threading
 import time
 from datetime import timedelta
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 from core.runner import Runner, SmallRunner, go_func
 from helper.logging import get_logger
@@ -25,10 +25,10 @@ class Ticker:
     def __init__(
         self,
         interval: timedelta,
-        task: Callable,
+        task: Callable[..., Any],
         use_mp: bool = True,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ):
         """
         Initializes the Ticker.
@@ -39,14 +39,14 @@ class Ticker:
         :param args: Positional arguments to pass to the task function.
         :param kwargs: Keyword arguments to pass to the task function.
         """
-        if not isinstance(interval, timedelta) or interval.total_seconds() <= 0:
+        if interval.total_seconds() <= 0:
             raise ValueError("Interval must be a positive timedelta.")
 
-        self._interval_seconds = interval.total_seconds()
-        self._task = task
-        self._use_mp = use_mp
-        self._args = args
-        self._kwargs = kwargs
+        self.interval_seconds: float = interval.total_seconds()
+        self._task: Callable[..., Any] = task
+        self._use_mp: bool = use_mp
+        self._args: Any = args
+        self._kwargs: Dict[str, Any] = kwargs
         self._runner: Optional[Union[Runner, SmallRunner]] = None
 
         if use_mp:
@@ -55,7 +55,7 @@ class Ticker:
             self._stop_event = threading.Event()
 
         logger.debug(
-            f"Ticker created: task={task.__name__}, interval={self._interval_seconds}s, use_mp={use_mp}, stop_event_created={id(self._stop_event)}"
+            f"Ticker created: task={task.__name__}, interval={self.interval_seconds}s, use_mp={use_mp}, stop_event_created={id(self._stop_event)}"
         )
 
     def _ticker_function(self):
@@ -64,7 +64,7 @@ class Ticker:
         It handles all the fixed-rate scheduling logic (sleep math).
         """
         logger.info(
-            f"Ticker {self._task.__name__} started, interval {self._interval_seconds}s."
+            f"Ticker {self._task.__name__} started, interval {self.interval_seconds}s."
         )
 
         while not self._stop_event.is_set():
@@ -81,7 +81,7 @@ class Ticker:
                 )
 
             elapsed_time = time.monotonic() - start_time
-            sleep_duration = self._interval_seconds - elapsed_time
+            sleep_duration = self.interval_seconds - elapsed_time
 
             if sleep_duration > 0:
                 # Sleep in smaller chunks to check stop event more frequently
@@ -98,7 +98,7 @@ class Ticker:
             else:
                 logger.warning(
                     f"Scheduled task took too long ({elapsed_time:.3f}s). "
-                    f"Interval {self._interval_seconds}s exceeded. Skipping sleep."
+                    f"Interval {self.interval_seconds}s exceeded. Skipping sleep."
                 )
 
     def go(self):
@@ -117,7 +117,7 @@ class Ticker:
         """
         Stops the background runner process/thread.
         """
-        if not self.is_running():
+        if not self._runner or not self.is_running():
             return
 
         self._stop_event.set()

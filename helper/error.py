@@ -4,6 +4,7 @@ Mirrors Go's helper/error.go with Python exception handling.
 """
 
 import inspect
+from types import FrameType
 
 
 class QueuerError(Exception):
@@ -15,7 +16,12 @@ class QueuerError(Exception):
     def __init__(self, trace: str, original: Exception):
         """Initialize QueuerError with original error and trace."""
         traceWithFunction = trace
-        frame = inspect.currentframe().f_back
+        current_frame = inspect.currentframe()
+
+        frame: FrameType | None = None
+        if current_frame is not None:
+            frame = current_frame.f_back
+
         if frame:
             traceWithFunction = f"{frame.f_code.co_name} - {trace}"
 

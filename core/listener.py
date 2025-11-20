@@ -20,9 +20,6 @@ class Listener(Generic[T]):
 
     def __init__(self, broadcaster: Broadcaster[T]):
         """Initialize listener."""
-        if broadcaster is None:
-            raise ValueError("broadcaster cannot be None")
-
         self.broadcaster: Broadcaster[T] = broadcaster
         self._stop_event = None
         self._listening = False
@@ -57,6 +54,9 @@ class Listener(Generic[T]):
             ch = await self.broadcaster.subscribe()
             if ready_event is not None:
                 ready_event.set()
+
+            if self._stop_event is None:
+                self._stop_event = threading.Event()
 
             try:
                 while not self._stop_event.is_set():

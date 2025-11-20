@@ -6,13 +6,13 @@ the singleton broadcaster pattern for sharing broadcasters across the system.
 """
 
 import asyncio
-from typing import TypeVar, Generic, Dict
+from typing import Any, TypeVar, Generic, Dict
 import uuid
 
 T = TypeVar("T")
 
 # Global registry for singleton broadcasters
-_broadcaster_registry: Dict[str, "Broadcaster"] = {}
+broadcaster_registry: Dict[str, "Broadcaster[Any]"] = {}
 
 
 class BroadcasterQueue(asyncio.Queue[T]):
@@ -20,19 +20,19 @@ class BroadcasterQueue(asyncio.Queue[T]):
 
     def __init__(self):
         super().__init__()
-        self._broadcaster_id: str = ""
+        self.broadcaster_id: str = ""
 
 
 class Broadcaster(Generic[T]):
     """A broadcaster that manages async listeners and broadcasts messages."""
 
-    def __new__(cls, name: str):
+    def __new__(cls, name: str) -> "Broadcaster[T]":
         """Singleton pattern: return existing instance if it exists."""
-        if name not in _broadcaster_registry:
+        if name not in broadcaster_registry:
             instance = super().__new__(cls)
-            _broadcaster_registry[name] = instance
+            broadcaster_registry[name] = instance
             return instance
-        return _broadcaster_registry[name]
+        return broadcaster_registry[name]
 
     def __init__(self, name: str):
         """Initialize a new broadcaster (only called once per unique name)."""
@@ -40,21 +40,21 @@ class Broadcaster(Generic[T]):
             self.name = name
             self.listeners: Dict[str, asyncio.Queue[T]] = {}
             self._lock = asyncio.Lock()
-            self._broadcaster_id: str = ""
+            self.broadcaster_id: str = ""
 
     async def subscribe(self) -> BroadcasterQueue[T]:
         """Subscribe to broadcasts and return a queue for receiving messages."""
         queue = BroadcasterQueue[T]()
-        queue._broadcaster_id = str(uuid.uuid4())
+        queue.broadcaster_id = str(uuid.uuid4())
 
         async with self._lock:
-            self.listeners[queue._broadcaster_id] = queue
+            self.listeners[queue.broadcaster_id] = queue
 
         return queue
 
     async def unsubscribe(self, queue: BroadcasterQueue[T]) -> None:
         """Unsubscribe a queue from broadcasts."""
-        queue_id = queue._broadcaster_id
+        queue_id = queue.broadcaster_id
         async with self._lock:
             if queue_id in self.listeners:
                 del self.listeners[queue_id]
@@ -72,6 +72,6 @@ class Broadcaster(Generic[T]):
                 pass
 
 
-def new_broadcaster(name: str) -> Broadcaster:
+def new_broadcaster(name: str) -> Broadcaster[Any]:
     """Get or create a singleton broadcaster with the given name."""
     return Broadcaster(name)

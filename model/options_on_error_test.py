@@ -4,6 +4,7 @@ Test cases for the OnError model.
 These tests mirror the Go model tests.
 """
 
+from typing import Any, Dict
 import pytest
 import json
 from model.options_on_error import OnError, RetryBackoff
@@ -71,7 +72,7 @@ class TestOnError:
             retry_delay=1.5,
             retry_backoff=RetryBackoff.LINEAR,
         )
-        expected = {
+        expected: Dict[str, Any] = {
             "timeout": 45.0,
             "max_retries": 2,
             "retry_delay": 1.5,
@@ -81,7 +82,7 @@ class TestOnError:
 
     def test_from_dict(self):
         """Test creating OnError from dictionary."""
-        data = {
+        data: Dict[str, Any] = {
             "timeout": 45.0,
             "max_retries": 2,
             "retry_delay": 1.5,
@@ -112,7 +113,7 @@ class TestOnError:
         )
         json_str = opts.to_json()
         data = json.loads(json_str)
-        expected = {
+        expected: Dict[str, Any] = {
             "timeout": 30.0,
             "max_retries": 3,
             "retry_delay": 1.0,

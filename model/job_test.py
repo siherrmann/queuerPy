@@ -4,6 +4,7 @@ Mirrors Go's model/job_test.go functionality.
 """
 
 import time
+from typing import Any, Dict
 import unittest
 from datetime import datetime, timedelta
 
@@ -45,7 +46,7 @@ class TestJob(unittest.TestCase):
     def test_new_job(self):
         """Test NewJob function with various parameters."""
 
-        test_cases = [
+        test_cases: list[Dict[str, Any]] = [
             {
                 "name": "Valid nil options",
                 "task": task_mock,
@@ -193,7 +194,7 @@ class TestJob(unittest.TestCase):
 
     def test_marshal_and_unmarshal_parameters(self):
         """Test parameter marshaling and unmarshaling."""
-        original_params = [1, "test", 3.14, True, {"key": "value"}]
+        original_params: list[Any] = [1, "test", 3.14, True, {"key": "value"}]
 
         # Create a job with parameters
         job = Job()
@@ -205,7 +206,7 @@ class TestJob(unittest.TestCase):
 
     def test_parameters_to_reflect_values(self):
         """Test converting parameters to reflection values (Python equivalent)."""
-        params = [1, "test", 3.14, True]
+        params: list[Any] = [1, "test", 3.14, True]
         job = Job()
         job.parameters = params
 

@@ -2,11 +2,13 @@
 Test for Job Database Handler using testcontainers.
 """
 
+from typing import Any, List
 import unittest
 from datetime import datetime
 from uuid import uuid4, UUID
 
 from database.db_job import JobDBHandler
+from database.db_worker import WorkerDBHandler
 from helper.test_database import DatabaseTestMixin
 from model.job import Job, JobStatus
 
@@ -28,6 +30,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         """Set up for each test method."""
         super().setup_method()
         self.job_handler = JobDBHandler(self.db, with_table_drop=True)
+        self.worker_handler = WorkerDBHandler(self.db, with_table_drop=True)
 
     def tearDown(self):
         """Clean up after each test method."""
@@ -41,14 +44,11 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_insert_and_select_job(self):
         """Test inserting and selecting a job."""
-        # Create a job
         job = Job(
             task_name="test_task",
             parameters=["param1", "param2"],
             status=JobStatus.QUEUED,
         )
-
-        # Insert the job
         inserted_job = self.job_handler.insert_job(job)
         self.assertIsNotNone(inserted_job)
         self.assertIsInstance(inserted_job.rid, UUID)
@@ -56,11 +56,12 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         # Select the job back
         retrieved_job = self.job_handler.select_job(inserted_job.rid)
         self.assertIsNotNone(retrieved_job)
-        self.assertEqual(retrieved_job.rid, inserted_job.rid)
-        self.assertEqual(retrieved_job.task_name, "test_task")
-        self.assertEqual(retrieved_job.parameters, ["param1", "param2"])
-        self.assertEqual(retrieved_job.status, JobStatus.QUEUED)
-        self.assertIsNotNone(retrieved_job.created_at)
+        if retrieved_job:
+            self.assertEqual(retrieved_job.rid, inserted_job.rid)
+            self.assertEqual(retrieved_job.task_name, "test_task")
+            self.assertEqual(retrieved_job.parameters, ["param1", "param2"])
+            self.assertEqual(retrieved_job.status, JobStatus.QUEUED)
+            self.assertIsNotNone(retrieved_job.created_at)
 
     def test_select_job_not_found(self):
         """Test selecting a non-existent job."""
@@ -70,8 +71,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_select_all_jobs(self):
         """Test selecting all jobs."""
-        # Create multiple jobs
-        jobs = []
+        jobs: List[Job] = []
         for i in range(3):
             job = Job(
                 task_name=f"test_task_{i}",
@@ -92,11 +92,9 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_delete_job(self):
         """Test deleting a job."""
-        # Create and insert a job
         job = Job(
             task_name="delete_test", parameters=["param"], status=JobStatus.QUEUED
         )
-
         inserted_job = self.job_handler.insert_job(job)
         self.assertIsNotNone(inserted_job)
 
@@ -113,14 +111,12 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_job_with_complex_parameters(self):
         """Test job with complex parameter types."""
-        # Create a job with complex parameters
-        complex_params = [
+        complex_params: List[Any] = [
             "string_param",
             42,
             {"key": "value", "nested": {"inner": "data"}},
             [1, 2, 3, "mixed", True],
         ]
-
         job = Job(
             task_name="complex_task", parameters=complex_params, status=JobStatus.QUEUED
         )
@@ -130,12 +126,12 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         retrieved_job = self.job_handler.select_job(inserted_job.rid)
 
         self.assertIsNotNone(retrieved_job)
-        self.assertEqual(retrieved_job.parameters, complex_params)
-        self.assertEqual(retrieved_job.task_name, "complex_task")
+        if retrieved_job:
+            self.assertEqual(retrieved_job.parameters, complex_params)
+            self.assertEqual(retrieved_job.task_name, "complex_task")
 
     def test_job_with_result(self):
         """Test job with result data."""
-        # Create a job with result
         job = Job(
             task_name="result_task",
             parameters=["input"],
@@ -148,14 +144,14 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         retrieved_job = self.job_handler.select_job(inserted_job.rid)
 
         self.assertIsNotNone(retrieved_job)
-        self.assertEqual(
-            retrieved_job.results, [{"output": "processed_data", "count": 42}]
-        )
-        self.assertEqual(retrieved_job.status, JobStatus.SUCCEEDED)
+        if retrieved_job:
+            self.assertEqual(
+                retrieved_job.results, [{"output": "processed_data", "count": 42}]
+            )
+            self.assertEqual(retrieved_job.status, JobStatus.SUCCEEDED)
 
     def test_job_with_error(self):
         """Test job with error information."""
-        # Create a job with error
         job = Job(
             task_name="error_task",
             parameters=["input"],
@@ -168,13 +164,13 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         retrieved_job = self.job_handler.select_job(inserted_job.rid)
 
         self.assertIsNotNone(retrieved_job)
-        self.assertEqual(retrieved_job.error, "Task failed due to invalid input")
-        self.assertEqual(retrieved_job.status, JobStatus.FAILED)
+        if retrieved_job:
+            self.assertEqual(retrieved_job.error, "Task failed due to invalid input")
+            self.assertEqual(retrieved_job.status, JobStatus.FAILED)
 
     def test_job_pagination(self):
         """Test job pagination functionality."""
-        # Create multiple jobs for pagination testing
-        jobs = []
+        jobs: List[Job] = []
         for i in range(5):
             job = Job(
                 task_name=f"page_task_{i}",
@@ -200,8 +196,6 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     def test_job_with_worker_assignment(self):
         """Test job with worker assignment."""
         worker_rid = uuid4()
-
-        # Create a job assigned to a worker
         job = Job(
             task_name="worker_task",
             parameters=["input"],
@@ -213,56 +207,45 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         # Insert and retrieve
         inserted_job = self.job_handler.insert_job(job)
         retrieved_job = self.job_handler.select_job(inserted_job.rid)
-
         self.assertIsNotNone(retrieved_job)
-        self.assertEqual(retrieved_job.worker_rid, worker_rid)
-        self.assertEqual(retrieved_job.status, JobStatus.RUNNING)
-        self.assertIsNotNone(retrieved_job.started_at)
+        if retrieved_job:
+            self.assertEqual(retrieved_job.worker_rid, worker_rid)
+            self.assertEqual(retrieved_job.status, JobStatus.RUNNING)
+            self.assertIsNotNone(retrieved_job.started_at)
 
     def test_job_lifecycle(self):
         """Test complete job lifecycle."""
-        # Create a job
         job = Job(
             task_name="lifecycle_task",
             parameters=["test_data"],
             status=JobStatus.QUEUED,
         )
-
-        # Insert job
         inserted_job = self.job_handler.insert_job(job)
 
         # Verify queued state
         retrieved_job = self.job_handler.select_job(inserted_job.rid)
-        self.assertEqual(retrieved_job.status, JobStatus.QUEUED)
-        self.assertIsNotNone(retrieved_job.created_at)
-        self.assertIsNone(retrieved_job.started_at)
-        # Note: finished_at is not a field in the Job model
-
-        # Note: The current API doesn't support job updates, only inserts
-        # In a real system, you'd update the job status as it progresses
-        # For now, we just verify the basic insert/select functionality
+        if retrieved_job:
+            self.assertEqual(retrieved_job.status, JobStatus.QUEUED)
+            self.assertIsNotNone(retrieved_job.created_at)
+            self.assertIsNone(retrieved_job.started_at)
 
     def test_update_job_final(self):
         """Test updating job with final status and archiving."""
-        # Create and insert a job
         job = Job(
             task_name="test_final_task",
             parameters=["param1"],
             status=JobStatus.RUNNING,
         )
-
         inserted_job = self.job_handler.insert_job(job)
-
-        # Update job with final status
         inserted_job.status = "SUCCEEDED"
-        inserted_job.results = {"result": "success"}
+        inserted_job.results = [{"result": "success"}]
         inserted_job.error = ""
 
         updated_job = self.job_handler.update_job_final(inserted_job)
 
         self.assertIsNotNone(updated_job)
         self.assertEqual(updated_job.status, "SUCCEEDED")
-        self.assertEqual(updated_job.results, {"result": "success"})
+        self.assertEqual(updated_job.results, [{"result": "success"}])
 
         # Verify job is no longer in main table
         main_job = self.job_handler.select_job(updated_job.rid)
@@ -271,22 +254,19 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         # Verify job is in archive
         archived_job = self.job_handler.select_job_from_archive(updated_job.rid)
         self.assertIsNotNone(archived_job)
-        self.assertEqual(archived_job.status, "SUCCEEDED")
+        if archived_job:
+            self.assertEqual(archived_job.status, "SUCCEEDED")
 
     def test_update_job_final_with_error(self):
         """Test updating job with failed status and error message."""
-        # Create and insert a job
         job = Job(
             task_name="test_failed_task",
             parameters=["param1"],
             status=JobStatus.RUNNING,
         )
-
         inserted_job = self.job_handler.insert_job(job)
-
-        # Update job with failed status
         inserted_job.status = "FAILED"
-        inserted_job.results = {}
+        inserted_job.results = []
         inserted_job.error = "Task execution failed"
 
         updated_job = self.job_handler.update_job_final(inserted_job)
@@ -298,46 +278,42 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         # Verify job is in archive with error
         archived_job = self.job_handler.select_job_from_archive(updated_job.rid)
         self.assertIsNotNone(archived_job)
-        self.assertEqual(archived_job.status, "FAILED")
-        self.assertEqual(archived_job.error, "Task execution failed")
+        if archived_job:
+            self.assertEqual(archived_job.status, "FAILED")
+            self.assertEqual(archived_job.error, "Task execution failed")
 
     def test_select_job_from_archive(self):
         """Test selecting a job from archive."""
-        # Create, insert, and archive a job
         job = Job(
             task_name="archive_test_task",
             parameters=["test"],
             status=JobStatus.RUNNING,
         )
-
         inserted_job = self.job_handler.insert_job(job)
         inserted_job.status = "SUCCEEDED"
-        inserted_job.results = {"archived": True}
+        inserted_job.results = [{"archived": True}]
 
         # Archive the job
         archived_job = self.job_handler.update_job_final(inserted_job)
 
         # Test selecting from archive
         retrieved_job = self.job_handler.select_job_from_archive(archived_job.rid)
-
         self.assertIsNotNone(retrieved_job)
-        self.assertEqual(retrieved_job.rid, archived_job.rid)
-        self.assertEqual(retrieved_job.task_name, "archive_test_task")
-        self.assertEqual(retrieved_job.status, "SUCCEEDED")
-        self.assertEqual(retrieved_job.results, {"archived": True})
+        if retrieved_job:
+            self.assertEqual(retrieved_job.rid, archived_job.rid)
+            self.assertEqual(retrieved_job.task_name, "archive_test_task")
+            self.assertEqual(retrieved_job.status, "SUCCEEDED")
+            self.assertEqual(retrieved_job.results, [{"archived": True}])
 
     def test_select_all_jobs_from_archive(self):
         """Test selecting all jobs from archive with pagination."""
-        archived_jobs = []
-
-        # Create and archive multiple jobs
+        archived_jobs: List[Job] = []
         for i in range(5):
             job = Job(
                 task_name=f"archive_job_{i}",
                 parameters=[f"param_{i}"],
                 status=JobStatus.RUNNING,
             )
-
             inserted_job = self.job_handler.insert_job(job)
             inserted_job.status = "SUCCEEDED"
 
@@ -346,8 +322,6 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
         # Test retrieving all archived jobs
         retrieved_jobs = self.job_handler.select_all_jobs_from_archive(entries=10)
-
-        # Should have at least our 5 test jobs
         self.assertGreaterEqual(len(retrieved_jobs), 5)
 
         # Test pagination
@@ -356,8 +330,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_select_all_jobs_by_search(self):
         """Test searching jobs by various criteria."""
-        # Create jobs with different task names
-        search_jobs = []
+        search_jobs: List[Job] = []
         for i in range(3):
             job = Job(
                 task_name=f"SearchableTask_{i}",
@@ -389,7 +362,6 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_select_all_jobs_from_archive_by_search(self):
         """Test searching archived jobs by various criteria."""
-        # Create and archive jobs with different names
         for i in range(3):
             job = Job(
                 task_name=f"ArchiveSearchTask_{i}",
@@ -426,7 +398,6 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_update_stale_jobs(self):
         """Test updating stale jobs functionality."""
-        # This test requires worker table setup, so we'll do a basic test
         updated_count = self.job_handler.update_stale_jobs()
 
         # Should return a number (could be 0 if no stale jobs)
@@ -438,7 +409,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             JobDBHandler(None)
 
-        self.assertIn("database connection is None", str(context.exception))
+        self.assertIn("Database connection is None", str(context.exception))
 
 
 if __name__ == "__main__":

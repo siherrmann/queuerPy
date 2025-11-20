@@ -9,7 +9,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.broadcaster import Broadcaster
+from core.broadcaster import Broadcaster, broadcaster_registry
 
 
 class TestBroadcaster(unittest.IsolatedAsyncioTestCase):
@@ -17,9 +17,7 @@ class TestBroadcaster(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         """Clear broadcaster registry before each test."""
-        from core.broadcaster import _broadcaster_registry
-
-        _broadcaster_registry.clear()
+        broadcaster_registry.clear()
 
     async def test_new_broadcaster(self):
         """Test creating a new broadcaster."""
@@ -42,7 +40,7 @@ class TestBroadcaster(unittest.IsolatedAsyncioTestCase):
 
     async def test_unsubscribe(self):
         """Test unsubscribing from a broadcaster."""
-        b = Broadcaster[int]("testBroadcaster")
+        b: Broadcaster[int] = Broadcaster[int]("testBroadcaster")
         ch = await b.subscribe()
         self.assertEqual(
             len(b.listeners), 1, "Should have one listener after subscribe"

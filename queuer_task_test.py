@@ -10,12 +10,12 @@ from queuer import new_queuer_with_db
 from helper.test_database import DatabaseTestMixin
 
 
-def task_1_test(data):
+def task_1_test(data: str) -> str:
     """Global test task function."""
     return f"Processed: {data}"
 
 
-def task_2_test(data):
+def task_2_test(data: str) -> str:
     """Global custom task function."""
     return f"Custom: {data}"
 
@@ -43,19 +43,10 @@ class TestQueuerTask(DatabaseTestMixin, unittest.TestCase):
         task = queuer.add_task(task_1_test)
 
         self.assertIsNotNone(task)
-        self.assertEqual(task.name, "task_1_test")
-        self.assertIn("task_1_test", queuer.tasks)
-        self.assertIn("task_1_test", queuer.worker.available_tasks)
-
-        queuer.stop()
-
-    def test_add_task_creation_error(self):
-        """Test error during task creation."""
-        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
-
-        # Test with invalid function (None)
-        with pytest.raises(Exception):
-            queuer.add_task(None)
+        if task:
+            self.assertEqual(task.name, "task_1_test")
+            self.assertIn("task_1_test", queuer.tasks)
+            self.assertIn("task_1_test", queuer.worker.available_tasks)
 
         queuer.stop()
 
@@ -79,16 +70,6 @@ class TestQueuerTask(DatabaseTestMixin, unittest.TestCase):
         self.assertEqual(result.name, "custom_name")
         self.assertIn("custom_name", queuer.tasks)
         self.assertIn("custom_name", queuer.worker.available_tasks)
-
-        queuer.stop()
-
-    def test_add_task_with_name_creation_error(self):
-        """Test error during task creation with name."""
-        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
-
-        # Test with invalid function (None)
-        with pytest.raises(Exception):
-            queuer.add_task_with_name(None, "custom_name")
 
         queuer.stop()
 

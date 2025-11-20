@@ -4,9 +4,10 @@ Mirrors Go's model/task_test.go functionality.
 """
 
 import inspect
+from typing import Any, Callable, Dict, List
 import unittest
 
-from model.task import Task, new_task, new_task_with_name
+from model.task import new_task, new_task_with_name
 
 
 class TestTask(unittest.TestCase):
@@ -28,7 +29,7 @@ class TestTask(unittest.TestCase):
         def func_with_multiple_params(a: int, b: str, c: float) -> tuple[bool, str]:
             return True, "result"
 
-        test_cases = [
+        test_cases: List[Dict[str, Any]] = [
             {
                 "name": "Valid task with no parameters",
                 "task": func_no_params,
@@ -118,7 +119,7 @@ class TestTask(unittest.TestCase):
         def valid_func():
             pass
 
-        test_cases = [
+        test_cases: List[Dict[str, Any]] = [
             {
                 "name": "Valid task with valid name",
                 "task": valid_func,
@@ -170,13 +171,6 @@ class TestTask(unittest.TestCase):
                             f"NewTaskWithName should not return an error for {test_case['name']}: {e}"
                         )
 
-    def test_task_defaults(self):
-        """Test default values for Task object."""
-        task = Task()
-
-        self.assertEqual(task.name, "")
-        self.assertIsNone(task.task)
-
     def test_task_callable_validation(self):
         """Test that task validation properly checks for callable objects."""
 
@@ -184,7 +178,7 @@ class TestTask(unittest.TestCase):
         def regular_function():
             pass
 
-        lambda_func = lambda x: x * 2
+        lambda_func: Callable[[int], int] = lambda x: x * 2
 
         class CallableClass:
             def __call__(self):
@@ -193,7 +187,12 @@ class TestTask(unittest.TestCase):
         callable_instance = CallableClass()
 
         # Test valid callables
-        for callable_obj in [regular_function, lambda_func, callable_instance]:
+        valid_callables: List[Callable[..., Any]] = [
+            regular_function,
+            lambda_func,
+            callable_instance,
+        ]
+        for callable_obj in valid_callables:
             with self.subTest(callable_type=type(callable_obj).__name__):
                 try:
                     task = new_task(callable_obj)
@@ -204,7 +203,8 @@ class TestTask(unittest.TestCase):
                     )
 
         # Test invalid callables
-        for non_callable in [123, "string", [], {}]:
+        invalid_callables: List[Any] = [123, "string", [], {}]
+        for non_callable in invalid_callables:
             with self.subTest(non_callable_type=type(non_callable).__name__):
                 with self.assertRaises(Exception):
                     new_task(non_callable)

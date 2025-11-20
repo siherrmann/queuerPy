@@ -5,10 +5,12 @@ Mirrors Go's helper/database.go with Python database utilities.
 
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from dataclasses import dataclass
 import psycopg
-from psycopg import Connection, sql
+from psycopg import Connection, ConnectionInfo, sql
+
+from helper.logging import QueuerLogger
 
 from .error import QueuerError
 from .sql import run_ddl
@@ -97,7 +99,7 @@ class Database:
         self,
         name: str,
         config: Optional[DatabaseConfiguration] = None,
-        logger: Optional[logging.Logger] = None,
+        logger: Optional[QueuerLogger] = None,
         auto_connect: bool = True,
     ):
         """Initialize database service."""
@@ -148,7 +150,7 @@ class Database:
         Mirrors Go's CheckTableExistance method.
         """
         if not self.instance:
-            raise QueuerError("Database connection not established")
+            raise Exception("Database connection not established")
 
         try:
             with self.instance.cursor() as cur:
@@ -176,7 +178,7 @@ class Database:
         Mirrors Go's CreateIndex method.
         """
         if not self.instance:
-            raise QueuerError("Database connection not established")
+            raise Exception("Database connection not established")
 
         try:
             index_name = f"idx_{table_name}_{column_name}"
@@ -209,7 +211,7 @@ class Database:
         Mirrors Go's CreateCombinedIndex method.
         """
         if not self.instance:
-            raise QueuerError("Database connection not established")
+            raise Exception("Database connection not established")
 
         try:
             index_name = f"idx_{table_name}_{column_name1}_{column_name2}"
@@ -236,7 +238,7 @@ class Database:
         Mirrors Go's CreateUniqueCombinedIndex method.
         """
         if not self.instance:
-            raise QueuerError("Database connection not established")
+            raise Exception("Database connection not established")
 
         try:
             index_name = f"idx_{table_name}_{column_name1}_{column_name2}"
@@ -269,10 +271,10 @@ class Database:
         Mirrors Go's DropIndex method.
         """
         if not self.instance:
-            raise QueuerError("Database connection not established")
+            raise Exception("Database connection not established")
 
+        index_name = f"idx_{table_name}_{json_map_key}"
         try:
-            index_name = f"idx_{table_name}_{json_map_key}"
             drop_sql = sql.SQL("DROP INDEX IF EXISTS {}").format(
                 sql.Identifier(index_name)
             )
@@ -287,7 +289,7 @@ class Database:
         Check the health of the database connection.
         Mirrors Go's Health method.
         """
-        stats = {}
+        stats: Dict[str, str] = {}
 
         if not self.instance:
             stats["status"] = "down"
@@ -304,13 +306,8 @@ class Database:
             stats["message"] = "It's healthy"
 
             # Get connection info
-            info = self.instance.info
+            info: ConnectionInfo = self.instance.info
             stats["server_version"] = str(info.server_version)
-
-            # Only add protocol_version if it exists
-            if hasattr(info, "protocol_version"):
-                stats["protocol_version"] = str(info.protocol_version)
-
             stats["backend_pid"] = str(info.backend_pid)
 
             # Get transaction status
@@ -337,6 +334,9 @@ class Database:
         Create a table if it doesn't exist.
         Returns True if table was created, False if it already existed.
         """
+        if not self.instance:
+            raise Exception("Database connection not established")
+
         if self.check_table_existence(table_name):
             return False
 
@@ -353,6 +353,9 @@ class Database:
         Drop a table if it exists.
         Returns True if table was dropped, False if it didn't exist.
         """
+        if not self.instance:
+            raise Exception("Database connection not established")
+
         if not self.check_table_existence(table_name):
             return False
 
@@ -370,7 +373,7 @@ class Database:
         Handles multiple statements separated by semicolons.
         """
         if not self.instance:
-            raise QueuerError("Database connection not established")
+            raise Exception("Database connection not established")
 
         try:
             with open(file_path, "r") as f:
@@ -384,7 +387,7 @@ class Database:
             with self.instance.cursor() as cur:
                 for statement in statements:
                     if statement:
-                        cur.execute(statement)
+                        cur.execute(statement.encode("utf-8"))
 
             self.instance.commit()
             self.logger.info(f"Executed SQL file: {file_path}")
@@ -404,7 +407,7 @@ class Database:
 def new_database(
     name: str,
     config: DatabaseConfiguration,
-    logger: Optional[logging.Logger] = None,
+    logger: Optional[QueuerLogger] = None,
     auto_connect: bool = True,
 ) -> Database:
     """
@@ -416,7 +419,7 @@ def new_database(
 
 def new_database_from_env(
     name: str = "queuer",
-    logger: Optional[logging.Logger] = None,
+    logger: Optional[QueuerLogger] = None,
     auto_connect: bool = False,
 ) -> Database:
     """
@@ -428,7 +431,7 @@ def new_database_from_env(
 
 
 def new_database_with_connection(
-    name: str, connection: Connection, logger: Optional[logging.Logger] = None
+    name: str, connection: Connection, logger: Optional[QueuerLogger] = None
 ) -> Database:
     """
     Create a new Database instance with an existing connection.

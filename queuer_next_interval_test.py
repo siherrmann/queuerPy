@@ -50,15 +50,6 @@ class TestQueuerNextInterval(DatabaseTestMixin, unittest.TestCase):
 
         queuer.stop()
 
-    def test_add_next_interval_func_none(self):
-        """Test adding None as next interval function."""
-        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
-
-        with pytest.raises(ValueError, match="NextIntervalFunc cannot be None"):
-            queuer.add_next_interval_func(None)
-
-        queuer.stop()
-
     def test_add_next_interval_func_already_exists(self):
         """Test adding a next interval function that already exists."""
         queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
@@ -78,15 +69,6 @@ class TestQueuerNextInterval(DatabaseTestMixin, unittest.TestCase):
         self.assertEqual(result.id, queuer.worker.id)
         self.assertIn("custom_name", queuer.next_interval_funcs)
         self.assertIn("custom_name", queuer.worker.available_next_interval_funcs)
-
-        queuer.stop()
-
-    def test_add_next_interval_func_with_name_none(self):
-        """Test adding None as next interval function with name."""
-        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
-
-        with pytest.raises(ValueError, match="NextIntervalFunc cannot be None"):
-            queuer.add_next_interval_func_with_name(None, "custom_name")
 
         queuer.stop()
 

@@ -9,13 +9,13 @@ from .runner import Runner, SmallRunner, go_func
 # Module-level functions for multiprocessing compatibility
 
 
-async def task_async(a, b):
+async def task_async(a: int, b: int) -> int:
     """Async task returning the sum and waiting for <a> seconds."""
     await asyncio.sleep(a)
     return a + b
 
 
-def task_sync(a, b):
+def task_sync(a: int, b: int) -> int:
     """Sync task returning the sum and waiting for <a> seconds."""
     time.sleep(a)
     return a + b
@@ -31,7 +31,7 @@ def failing_task_sync():
     raise ValueError("This task always fails")
 
 
-def task_with_kwargs(a, b, multiplier=1):
+def task_with_kwargs(a: int, b: int, multiplier: int = 1) -> int:
     """Task with keyword arguments for testing."""
     return (a + b) * multiplier
 
@@ -47,14 +47,14 @@ class TestRunner(unittest.TestCase):
     def test_successful_task(self):
         """Test running a successful task."""
         # Test async task
-        runner = Runner(task_async, (0.1, 3), {})
+        runner = Runner(task_async, 0.1, 3)
         runner.go()
         result = runner.get_results(timeout=2.0)
         self.assertEqual(result, 3.1, "Expected 0.1 + 3 = 3.1")
         self.assertEqual(runner.exitcode, 0)
 
         # Test sync task
-        runner2 = Runner(task_sync, (0.1, 2), {})
+        runner2 = Runner(task_sync, 0.1, 2)
         runner2.go()
         result2 = runner2.get_results(timeout=2.0)
         self.assertEqual(result2, 2.1, "Expected 0.1 + 2 = 2.1")
@@ -63,7 +63,7 @@ class TestRunner(unittest.TestCase):
     def test_failed_task(self):
         """Test running a task that fails."""
         # Test async failing task
-        runner = Runner(failing_task_async, (), {})
+        runner = Runner(failing_task_async)
         runner.go()
 
         # Test that Runner properly handles exceptions
@@ -76,26 +76,26 @@ class TestRunner(unittest.TestCase):
 
     def test_runner_initialization(self):
         """Test Runner initialization and properties."""
-        runner = Runner(task_sync, (1, 2), {"extra": "value"})
+        runner = Runner(task_sync, 1, 2, extra="value")
 
         self.assertEqual(runner.task, task_sync)
         self.assertEqual(runner.args, (1, 2))
         self.assertEqual(runner.kwargs, {"extra": "value"})
         self.assertFalse(runner.is_async)
-        self.assertTrue(runner.name.startswith("Runner-task_sync"))
+        self.assertEqual(runner.name, "task_sync")
         self.assertTrue(runner.daemon)
 
     def test_async_runner_initialization(self):
         """Test async Runner initialization."""
-        runner = Runner(task_async, (1, 2), {}, name_prefix="AsyncTest")
+        runner = Runner(task_async, 1, 2)
 
         self.assertEqual(runner.task, task_async)
         self.assertTrue(runner.is_async)
-        self.assertTrue(runner.name.startswith("AsyncTest-task_async"))
+        self.assertEqual(runner.name, "task_async")
 
     def test_runner_with_kwargs(self):
         """Test runner with keyword arguments."""
-        runner = Runner(task_with_kwargs, (2, 3), {"multiplier": 5})
+        runner = Runner(task_with_kwargs, 2, 3, multiplier=5)
         runner.go()
         result = runner.get_results(timeout=1.0)
         self.assertEqual(result, 25)  # (2 + 3) * 5
@@ -106,42 +106,33 @@ class TestRunner(unittest.TestCase):
         def test_function():
             pass
 
-        runner1 = Runner(test_function, (), {})
-        runner2 = Runner(test_function, (), {}, name_prefix="Custom")
+        runner1 = Runner(test_function)
+        runner2 = Runner(test_function)
 
-        self.assertTrue(runner1.name.startswith("Runner-test_function"))
-        self.assertTrue(runner2.name.startswith("Custom-test_function"))
+        self.assertEqual(runner1.name, "test_function")
+        self.assertEqual(runner2.name, "test_function")
 
     def test_parameter_validation(self):
         """Test parameter validation."""
         # Should work with correct parameters
-        runner = Runner(task_async, (0.1, 5), {})
+        runner = Runner(task_async, 0.1, 5)
         runner.go()
         result = runner.get_results(timeout=2.0)
         self.assertEqual(result, 5.1, "Expected 0.1 + 5 = 5.1")
 
         # Should fail with wrong number of parameters
-        runner2 = Runner(task_async, (1,), {})  # Missing one parameter
+        runner2 = Runner(task_async, 1)  # Missing one parameter
         runner2.go()
         with self.assertRaises(TypeError):
             runner2.get_results(timeout=2.0)
-
-    def test_non_callable_task(self):
-        """Test that non-callable task raises error."""
-        # Try to run a non-callable object through Runner
-        # This should fail during construction or execution
-        with self.assertRaises((TypeError, AttributeError)):
-            runner = Runner("not a function", (), {})
-            runner.go()
-            runner.get_results(timeout=2.0)
 
     def test_multiple_concurrent_tasks(self):
         """Test running multiple tasks concurrently."""
         # Start multiple runners concurrently
         start_time = time.time()
-        runner1 = Runner(task_async, (0.1, 10), {})
-        runner2 = Runner(task_async, (0.1, 20), {})
-        runner3 = Runner(task_async, (0.1, 30), {})
+        runner1 = Runner(task_async, 0.1, 10)
+        runner2 = Runner(task_async, 0.1, 20)
+        runner3 = Runner(task_async, 0.1, 30)
 
         # Start all runners
         runner1.go()
@@ -185,13 +176,13 @@ class TestSmallRunner(unittest.TestCase):
     def test_successful_task(self):
         """Test running a successful task with SmallRunner."""
         # Test async task
-        runner = SmallRunner(task_async, (0.1, 3), {})
+        runner = SmallRunner(task_async, 0.1, 3)
         runner.go()
         result = runner.get_results(timeout=2.0)
         self.assertEqual(result, 3.1, "Expected 0.1 + 3 = 3.1")
 
         # Test sync task
-        runner2 = SmallRunner(task_sync, (0.1, 2), {})
+        runner2 = SmallRunner(task_sync, 0.1, 2)
         runner2.go()
         result2 = runner2.get_results(timeout=2.0)
         self.assertEqual(result2, 2.1, "Expected 0.1 + 2 = 2.1")
@@ -199,7 +190,7 @@ class TestSmallRunner(unittest.TestCase):
     def test_failed_task(self):
         """Test running a task that fails with SmallRunner."""
         # Test async failing task
-        runner = SmallRunner(failing_task_async, (), {})
+        runner = SmallRunner(failing_task_async)
         runner.go()
 
         # Test that SmallRunner properly handles exceptions
@@ -213,33 +204,24 @@ class TestSmallRunner(unittest.TestCase):
     def test_parameter_validation(self):
         """Test parameter validation with SmallRunner."""
         # Should work with correct parameters
-        runner = SmallRunner(task_async, (0.1, 5), {})
+        runner = SmallRunner(task_async, 0.1, 5)
         runner.go()
         result = runner.get_results(timeout=2.0)
         self.assertEqual(result, 5.1, "Expected 0.1 + 5 = 5.1")
 
         # Should fail with wrong number of parameters
-        runner2 = SmallRunner(task_async, (1,), {})  # Missing one parameter
+        runner2 = SmallRunner(task_async, 1)  # Missing one parameter
         runner2.go()
         with self.assertRaises(TypeError):
             runner2.get_results(timeout=2.0)
-
-    def test_non_callable_task(self):
-        """Test that non-callable task raises error in SmallRunner."""
-        # Try to run a non-callable object through SmallRunner
-        # This should fail during construction or execution
-        with self.assertRaises((TypeError, AttributeError)):
-            runner = SmallRunner("not a function", (), {})
-            runner.go()
-            runner.get_results(timeout=2.0)
 
     def test_multiple_concurrent_tasks(self):
         """Test running multiple SmallRunner tasks concurrently."""
         # Start multiple SmallRunners concurrently
         start_time = time.time()
-        runner1 = SmallRunner(task_async, (0.1, 10), {})
-        runner2 = SmallRunner(task_async, (0.1, 20), {})
-        runner3 = SmallRunner(task_async, (0.1, 30), {})
+        runner1 = SmallRunner(task_async, 0.1, 10)
+        runner2 = SmallRunner(task_async, 0.1, 20)
+        runner3 = SmallRunner(task_async, 0.1, 30)
 
         # Start all runners
         runner1.go()

@@ -197,7 +197,7 @@ class TestDatabase(unittest.TestCase):
 
     @patch("helper.database.psycopg.connect")
     @patch("helper.database.run_ddl")
-    def test_connect_to_database_success(self, mock_run_ddl, mock_connect):
+    def test_connect_to_database_success(self, mock_run_ddl: Mock, mock_connect: Mock):
         """Test successful database connection."""
         mock_connection = Mock()
         mock_connect.return_value = mock_connection
@@ -217,7 +217,7 @@ class TestDatabase(unittest.TestCase):
         )
 
     @patch("helper.database.psycopg.connect")
-    def test_connect_to_database_failure(self, mock_connect):
+    def test_connect_to_database_failure(self, mock_connect: Mock):
         """Test database connection failure."""
         original_error = Exception("Connection failed")
         mock_connect.side_effect = original_error
@@ -243,7 +243,7 @@ class TestDatabase(unittest.TestCase):
 
     @patch("helper.database.psycopg.connect")
     @patch("helper.database.run_ddl")
-    def test_auto_connect_enabled(self, mock_run_ddl, mock_connect):
+    def test_auto_connect_enabled(self, mock_run_ddl: Mock, mock_connect: Mock):
         """Test auto-connection on initialization."""
         mock_connection = Mock()
         mock_connect.return_value = mock_connection
@@ -270,7 +270,7 @@ class TestDatabaseUtilities(unittest.TestCase):
         self.assertTrue(callable(new_database))
 
     @patch("helper.database.Database")
-    def test_new_database_creates_instance(self, mock_database_class):
+    def test_new_database_creates_instance(self, mock_database_class: Mock):
         """Test new_database function creates Database instance."""
         from helper.database import new_database
 

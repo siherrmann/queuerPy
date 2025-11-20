@@ -4,24 +4,25 @@ Mirrors Go's queuerTask.go functionality.
 """
 
 import logging
-from typing import Callable, Union, TYPE_CHECKING
+from typing import Any, Callable, Optional
 
 from model.task import new_task, new_task_with_name
-
-if TYPE_CHECKING:
-    from model.task import Task
-    from model.worker import Worker
+from model.task import Task
+from queuer_global import QueuerGlobalMixin
 
 logger = logging.getLogger(__name__)
 
 
-class QueuerTaskMixin:
+class QueuerTaskMixin(QueuerGlobalMixin):
     """
     Mixin class containing task-related methods for the Queuer.
     Mirrors Go's queuerTask.go functionality.
     """
 
-    def add_task(self, task: Callable) -> "Task":
+    def __init__(self):
+        super().__init__()
+
+    def add_task(self, task: Callable[..., Any]) -> Optional[Task]:
         """
         Add a new task to the queuer.
         Creates a new task with the provided task function, adds it to the worker's available tasks,
@@ -32,6 +33,10 @@ class QueuerTaskMixin:
         :return: The newly created task
         :raises RuntimeError: If task creation fails or task already exists
         """
+        task_name = task.__name__
+        if task_name in self.tasks:
+            raise RuntimeError(f"Task already exists: {task_name}")
+
         try:
             new_task_obj = new_task(task)
         except Exception as e:
@@ -52,7 +57,7 @@ class QueuerTaskMixin:
         logger.info(f"Task added: {new_task_obj.name}")
         return new_task_obj
 
-    def add_task_with_name(self, task: Callable, name: str) -> "Task":
+    def add_task_with_name(self, task: Callable[..., Any], name: str) -> "Task":
         """
         Add a new task with a specific name to the queuer.
         Creates a new task with the provided task function and name, adds it to the worker's available tasks,

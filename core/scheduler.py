@@ -21,12 +21,20 @@ class Scheduler:
 
     def __init__(
         self,
-        task: Callable,
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-        start_time: Optional[datetime],
+        task: Callable[..., Any],
+        start_time: Optional[datetime] = None,
+        *args: Any,
+        **kwargs: Any,
     ):
-        """Initialize a new scheduler with task and parameters."""
+        """
+        Initialize a new scheduler with task and parameters.
+
+        :param task: The synchronous function to execute.
+        :param args: Positional arguments for the task.
+        :param kwargs: Keyword arguments for the task.
+        :param start_time: The datetime when the task should be executed.
+        :raises ValueError: If the task or parameters are invalid.
+        """
         try:
             check_valid_task_with_parameters(task, *args, **kwargs)
         except Exception as e:

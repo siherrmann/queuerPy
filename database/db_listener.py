@@ -31,11 +31,11 @@ class QueuerListener:
         self.channel = channel
         self.connection: Optional[AsyncConnection] = None
         self.logger = logging.getLogger(f"queuer_db_listener_{channel}")
-        self._listening = False
-        self._listen_task: Optional[asyncio.Task] = None
+        self.listening = False
+        self._listen_task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
 
-    async def _connect(self) -> None:
+    async def connect(self) -> None:
         """Establish async database connection."""
         try:
             self.connection = await psycopg.AsyncConnection.connect(
@@ -50,13 +50,13 @@ class QueuerListener:
 
             # Start listening to the channel
             async with self.connection.cursor() as cur:
-                await cur.execute(f"LISTEN {self.channel}")
+                await cur.execute(f"LISTEN {self.channel}".encode("utf-8"))
 
             self.logger.info(f"Connected and listening on channel: {self.channel}")
         except Exception as e:
             self.logger.error(f"Failed to connect to database: {e}")
             self.connection = None
-            raise QueuerError("listen", str(e))
+            raise QueuerError("listen", e)
 
     async def listen(self, notify_function: Callable[[str], Awaitable[None]]) -> None:
         """
@@ -66,21 +66,25 @@ class QueuerListener:
         Args:
             notify_function: Async function to call when a notification is received
         """
-        if self._listening:
+        if self.listening:
             return
 
-        self._listening = True
+        self.listening = True
         self._stop_event.clear()
 
         # Connect if needed
         if not self.connection:
-            await self._connect()
+            await self.connect()
+
+        # Verify connection was established
+        if not self.connection:
+            raise Exception("No database connection established.")
 
         self.logger.info(f"Starting listener for channel: {self.channel}")
 
         try:
             # Main listening loop
-            while self._listening and not self._stop_event.is_set():
+            while self.listening and not self._stop_event.is_set():
                 try:
                     # Check for notifications with timeout
                     gen = self.connection.notifies()
@@ -116,7 +120,7 @@ class QueuerListener:
                     self.logger.error(f"Error in listen loop: {e}")
                     # Try to reconnect
                     try:
-                        await self._connect()
+                        await self.connect()
                     except:
                         self.logger.error("Failed to reconnect, stopping listener")
                         break
@@ -124,15 +128,15 @@ class QueuerListener:
         except asyncio.CancelledError:
             self.logger.info("Listener cancelled")
         finally:
-            self._listening = False
+            self.listening = False
             self.logger.info(f"Listener stopped for channel: {self.channel}")
 
     async def stop(self) -> None:
         """Stop the listener."""
-        if not self._listening:
+        if not self.listening:
             return
 
-        self._listening = False
+        self.listening = False
         self._stop_event.set()
 
         # Close the connection

@@ -6,6 +6,7 @@ Simplified testcontainers implementation for reliable testing.
 import os
 import threading
 import time
+from typing import Any
 import psutil
 from testcontainers.postgres import PostgresContainer
 from helper.database import Database, DatabaseConfiguration
@@ -26,7 +27,12 @@ class DatabaseTestMixin:
         """Set up PostgreSQL container for the entire test class (lazy initialization)."""
         # Only create container if we don't already have one for this class
         if not hasattr(cls, "_container_initialized"):
-            cls.container = PostgresContainer("timescale/timescaledb:latest-pg16")
+            cls.container: PostgresContainer = PostgresContainer(
+                "timescale/timescaledb:latest-pg16",
+                dbname="test_db",
+                username="test_user",
+                password="test_password",
+            )
             cls.container.start()
 
             # Set environment variables for database configuration
@@ -36,9 +42,9 @@ class DatabaseTestMixin:
             cls.db_config = DatabaseConfiguration(
                 host=cls.container.get_container_host_ip(),
                 port=cls.container.get_exposed_port(5432),
-                database=cls.container.dbname,
-                username=cls.container.username,
-                password=cls.container.password,
+                database="test_db",
+                username="test_user",
+                password="test_password",
                 schema="public",
                 sslmode="disable",
                 with_table_drop=True,
@@ -57,7 +63,7 @@ class DatabaseTestMixin:
             if hasattr(cls, "_container_initialized"):
                 delattr(cls, "_container_initialized")
 
-    def setup_method(self, method=None):
+    def setup_method(self, method: Any = None):
         """Set up fresh database connection for each test method."""
         self.db = Database("test_db", self.db_config)
 
@@ -66,14 +72,14 @@ class DatabaseTestMixin:
             f"🔍 DIAGNOSTIC - Test setup - Active threads: {self._initial_thread_count}"
         )
 
-    def teardown_method(self, method=None):
+    def teardown_method(self, method: Any = None):
         """Clean up database connection after each test method."""
         if hasattr(self, "db") and self.db:
             try:
                 if hasattr(self.db, "instance") and self.db.instance:
                     self.db.instance.rollback()
                 self.db.close()
-            except Exception as e:
+            except Exception:
                 pass
 
         # Give threads time to clean up
@@ -102,7 +108,7 @@ class DatabaseTestMixin:
                     logger.warning(
                         f"🧵 Active thread: {thread.name} ({type(thread).__name__})"
                     )
-        except Exception as e:
+        except Exception:
             logger.warning("📊 DIAGNOSTIC - monitoring not available")
 
     @classmethod
@@ -110,9 +116,9 @@ class DatabaseTestMixin:
         """Set environment variables for database configuration."""
         os.environ["QUEUER_DB_HOST"] = cls.container.get_container_host_ip()
         os.environ["QUEUER_DB_PORT"] = str(cls.container.get_exposed_port(5432))
-        os.environ["QUEUER_DB_DATABASE"] = cls.container.dbname
-        os.environ["QUEUER_DB_USERNAME"] = cls.container.username
-        os.environ["QUEUER_DB_PASSWORD"] = cls.container.password
+        os.environ["QUEUER_DB_DATABASE"] = "test_db"
+        os.environ["QUEUER_DB_USERNAME"] = "test_user"
+        os.environ["QUEUER_DB_PASSWORD"] = "test_password"
         os.environ["QUEUER_DB_SCHEMA"] = "public"
         os.environ["QUEUER_DB_SSLMODE"] = "disable"
         os.environ["QUEUER_DB_WITH_TABLE_DROP"] = "true"

@@ -5,7 +5,9 @@ Mirrors the Go Task struct with Python types.
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Callable, List, Any, Type
+from typing import Callable, List, Any
+
+from helper.error import QueuerError
 
 
 @dataclass
@@ -15,10 +17,10 @@ class Task:
     Mirrors the Go Task struct for compatibility.
     """
 
-    task: Callable = None
+    task: Callable[..., Any]
     name: str = ""
-    input_parameters: List[Type] = field(default_factory=list)
-    output_parameters: List[Type] = field(default_factory=list)
+    input_parameters: List[Any] = field(default_factory=lambda: [])
+    output_parameters: List[Any] = field(default_factory=lambda: [])
 
     def __post_init__(self):
         """Initialize parameter types from the function signature."""
@@ -36,7 +38,7 @@ class Task:
                 self.output_parameters = [Any]
 
 
-def get_task_name_from_function(task: Callable) -> str:
+def get_task_name_from_function(task: Callable[..., Any]) -> str:
     """
     Get task name from function.
     Mirrors Go's helper.GetTaskNameFromFunction.
@@ -52,7 +54,7 @@ def get_task_name_from_function(task: Callable) -> str:
         return str(task)
 
 
-def new_task(task: Callable) -> Task:
+def new_task(task: Callable[..., Any]) -> Task:
     """
     Create a new task from function.
     Mirrors Go's NewTask function.
@@ -61,10 +63,10 @@ def new_task(task: Callable) -> Task:
         task_name = get_task_name_from_function(task)
         return new_task_with_name(task, task_name)
     except Exception as e:
-        raise
+        raise QueuerError("creating task", e)
 
 
-def new_task_with_name(task: Callable, task_name: str) -> Task:
+def new_task_with_name(task: Callable[..., Any], task_name: str) -> Task:
     """
     Create a new task with specified name.
     Mirrors Go's NewTaskWithName function.

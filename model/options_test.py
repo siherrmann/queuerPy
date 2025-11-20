@@ -4,6 +4,7 @@ Mirrors Go's model/option_test.go functionality.
 """
 
 import json
+from typing import Any, Dict, List
 import unittest
 from datetime import datetime, timedelta
 
@@ -17,7 +18,7 @@ class TestOptions(unittest.TestCase):
     def test_options_is_valid(self):
         """Test Options validation with various parameters."""
 
-        test_cases = [
+        test_cases: List[Dict[str, Any]] = [
             {
                 "name": "Valid nil options",
                 "options": None,
@@ -208,21 +209,25 @@ class TestOptions(unittest.TestCase):
             restored_options = Options.from_dict(parsed_dict)
 
             # Verify the restored options match the original
-            self.assertEqual(
-                original_options.on_error.timeout, restored_options.on_error.timeout
-            )
-            self.assertEqual(
-                original_options.on_error.max_retries,
-                restored_options.on_error.max_retries,
-            )
-            self.assertEqual(
-                original_options.on_error.retry_delay,
-                restored_options.on_error.retry_delay,
-            )
-            self.assertEqual(
-                original_options.on_error.retry_backoff,
-                restored_options.on_error.retry_backoff,
-            )
+            if (
+                original_options.on_error is not None
+                and restored_options.on_error is not None
+            ):
+                self.assertEqual(
+                    original_options.on_error.timeout, restored_options.on_error.timeout
+                )
+                self.assertEqual(
+                    original_options.on_error.max_retries,
+                    restored_options.on_error.max_retries,
+                )
+                self.assertEqual(
+                    original_options.on_error.retry_delay,
+                    restored_options.on_error.retry_delay,
+                )
+                self.assertEqual(
+                    original_options.on_error.retry_backoff,
+                    restored_options.on_error.retry_backoff,
+                )
 
             # Note: Schedule comparison might need special handling for datetime fields
             if original_options.schedule and restored_options.schedule:

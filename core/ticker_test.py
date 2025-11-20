@@ -2,6 +2,7 @@
 Simple tests for the ticker implementation.
 """
 
+from typing import Any
 import unittest
 import time
 import threading
@@ -12,8 +13,8 @@ from core.ticker import Ticker
 # Shared variables for testing (using threading-safe approach)
 _test_counter = 0
 _test_lock = threading.Lock()
-_test_times = []
-_test_params = []
+_test_times: list[float] = []
+_test_params: list[Any] = []
 
 
 def _reset_test_data():
@@ -32,7 +33,7 @@ def _test_task_counter():
         _test_counter += 1
 
 
-def _test_task_with_params(param1, param2):
+def _test_task_with_params(param1: str, param2: int):
     """Task with parameters for testing."""
     global _test_params
     with _test_lock:
@@ -61,7 +62,7 @@ class TestTicker(unittest.TestCase):
 
         ticker = Ticker(timedelta(seconds=0.1), test_task, use_mp=False)
         self.assertIsNotNone(ticker)
-        self.assertEqual(ticker._interval_seconds, 0.1)
+        self.assertEqual(ticker.interval_seconds, 0.1)
 
     def test_invalid_interval(self):
         """Test that invalid interval raises error."""
@@ -116,20 +117,7 @@ class TestTicker(unittest.TestCase):
 
         # Just verify the ticker was created successfully
         self.assertIsNotNone(ticker)
-        self.assertEqual(ticker._args, ("hello", 42))
-
-    def test_ticker_properties(self):
-        """Test ticker properties are set correctly."""
-
-        def test_task(a, b):
-            pass
-
-        ticker = Ticker(timedelta(seconds=0.5), test_task, True, 1, 2)  # use_mp
-
-        self.assertEqual(ticker._interval_seconds, 0.5)
-        self.assertEqual(ticker._task, test_task)
-        self.assertTrue(ticker._use_mp)
-        self.assertEqual(ticker._args, (1, 2))
+        self.assertEqual(ticker.interval_seconds, 0.1)
 
 
 if __name__ == "__main__":

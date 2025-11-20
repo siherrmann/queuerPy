@@ -5,7 +5,7 @@ Mirrors the Go Options struct with Python types.
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, Optional
 from .options_on_error import OnError
 
 
@@ -16,15 +16,17 @@ class Schedule:
     Mirrors the Go Schedule struct.
     """
 
-    start: datetime = None
+    start: Optional[datetime] = None
     max_count: int = 1
     interval: Optional[timedelta] = None
     next_interval: Optional[str] = None
 
     def is_valid(self) -> bool:
-        """Validate the schedule options."""
-        if self.start is None:
-            return False
+        """
+        Validate the schedule options.
+
+        :return: True if valid, False otherwise.
+        """
         if self.max_count < 0:
             return False
         if (
@@ -35,8 +37,12 @@ class Schedule:
             return False
         return True
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization."""
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert to dictionary for JSON serialization.
+
+        :return: Dictionary representation of the Schedule.
+        """
         return {
             "start": self.start.isoformat() if self.start else None,
             "max_count": self.max_count,
@@ -45,8 +51,13 @@ class Schedule:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Schedule":
-        """Create Schedule from dictionary."""
+    def from_dict(cls, data: Dict[str, Any]) -> "Schedule":
+        """
+        Create Schedule from dictionary.
+
+        :param data: Dictionary containing schedule data.
+        :return: Schedule instance.
+        """
         schedule = cls()
         if data.get("start"):
             schedule.start = datetime.fromisoformat(data["start"])
@@ -68,23 +79,36 @@ class Options:
     schedule: Optional[Schedule] = None
 
     def is_valid(self) -> bool:
-        """Validate the options."""
+        """
+        Validate the options.
+
+        :return: True if valid, False otherwise.
+        """
         if self.on_error is not None and not self.on_error.is_valid():
             return False
         if self.schedule is not None and not self.schedule.is_valid():
             return False
         return True
 
-    def to_dict(self) -> dict:
-        """Convert options to dictionary for serialization."""
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert options to dictionary for serialization.
+
+        :return: Dictionary representation of the Options.
+        """
         return {
             "on_error": self.on_error.to_dict() if self.on_error else None,
             "schedule": self.schedule.to_dict() if self.schedule else None,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Options":
-        """Create options from dictionary."""
+    def from_dict(cls, data: Dict[str, Any]) -> "Options":
+        """
+        Create options from dictionary.
+
+        :param data: Dictionary containing options data.
+        :return: Options instance.
+        """
         options = cls()
         if data.get("on_error"):
             options.on_error = OnError.from_dict(data["on_error"])
@@ -98,5 +122,9 @@ def new_options(
 ) -> Options:
     """
     Create new options. Mirrors Go's pattern.
+
+    :param on_error: OnError options.
+    :param schedule: Schedule options.
+    :return: Options instance.
     """
     return Options(on_error=on_error, schedule=schedule)

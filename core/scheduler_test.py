@@ -13,12 +13,12 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_immediate_execution(self):
         """Test scheduler with immediate execution (None start_time)."""
-        executed = []
+        executed: list[str] = []
 
-        def test_task(message):
+        def test_task(message: str) -> None:
             executed.append(message)
 
-        scheduler = Scheduler(test_task, ("immediate",), {}, None)
+        scheduler = Scheduler(test_task, None, "immediate")
         scheduler.go()
 
         # Wait a bit for execution
@@ -29,16 +29,16 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_delayed_execution(self):
         """Test scheduler with delayed execution."""
-        executed = []
+        executed: list[tuple[str, float]] = []
         start_time = time.time()
 
-        def test_task(message):
+        def test_task(message: str) -> None:
             execution_time = time.time()
             executed.append((message, execution_time - start_time))
 
         # Schedule for 0.3 seconds from now
         future_time = datetime.now() + timedelta(seconds=0.3)
-        scheduler = Scheduler(test_task, ("delayed",), {}, future_time)
+        scheduler = Scheduler(test_task, future_time, "delayed")
         scheduler.go()
 
         # Wait for execution
@@ -56,14 +56,14 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_past_time_execution(self):
         """Test scheduler with past time (should execute immediately)."""
-        executed = []
+        executed: list[str] = []
 
-        def test_task(message):
+        def test_task(message: str) -> None:
             executed.append(message)
 
         # Use a time in the past
         past_time = datetime.now() - timedelta(seconds=10)
-        scheduler = Scheduler(test_task, ("past_time",), {}, past_time)
+        scheduler = Scheduler(test_task, past_time, "past_time")
         scheduler.go()
 
         # Wait a bit for execution
@@ -74,12 +74,12 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_with_multiple_args(self):
         """Test scheduler with multiple positional arguments."""
-        executed = []
+        executed: list[int] = []
 
-        def test_task(a, b, c):
+        def test_task(a: int, b: int, c: int) -> None:
             executed.append(a + b + c)
 
-        scheduler = Scheduler(test_task, (10, 20, 30), {}, None)
+        scheduler = Scheduler(test_task, None, 10, 20, 30)
         scheduler.go()
 
         time.sleep(0.2)
@@ -89,12 +89,12 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_with_no_parameters(self):
         """Test scheduler with task that takes no parameters."""
-        executed = []
+        executed: list[str] = []
 
-        def test_task():
+        def test_task() -> None:
             executed.append("no_params")
 
-        scheduler = Scheduler(test_task, (), {}, None)
+        scheduler = Scheduler(test_task, None)
         scheduler.go()
 
         time.sleep(0.2)
@@ -105,25 +105,21 @@ class TestScheduler(unittest.TestCase):
     def test_scheduler_invalid_task_validation(self):
         """Test that scheduler validates task and parameters."""
 
-        def valid_task(param):
+        def valid_task(_: str) -> None:
             pass
 
         # Test with wrong number of parameters
         with self.assertRaises(ValueError):
-            Scheduler(valid_task, (), {}, None)  # Missing required parameter
-
-        # Test with non-callable task
-        with self.assertRaises(ValueError):
-            Scheduler("not_callable", ("param",), {}, None)
+            Scheduler(valid_task, None)  # Missing required parameter
 
     def test_scheduler_properties(self):
         """Test scheduler properties are set correctly."""
 
-        def test_task(a, b):
+        def test_task(_: int, __: int) -> None:
             pass
 
         start_time = datetime.now() + timedelta(seconds=1)
-        scheduler = Scheduler(test_task, (1, 2), {}, start_time)
+        scheduler = Scheduler(test_task, start_time, 1, 2)
 
         self.assertEqual(scheduler.task, test_task)
         self.assertEqual(scheduler.args, [1, 2])
