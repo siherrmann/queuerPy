@@ -16,15 +16,31 @@ The job table contains only queued, scheduled and running tasks. The ended jobs 
 
 # 🛠️ Installation
 
-To integrate the queuer package into your Python project:
+## PyPI Installation (Recommended)
+
+```bash
+pip install queuer-py
+```
+
+For development dependencies:
+```bash
+pip install queuer-py[dev]
+```
+
+## Development Installation
+
+To integrate the queuer package into your Python project for development:
 
 ```bash
 # Clone the repository
 git clone https://github.com/siherrmann/queuerPy.git
 cd queuerPy
 
-# Install dependencies
-pip install -r requirements.txt
+# Install in development mode
+pip install -e .
+
+# Or with development dependencies
+pip install -e .[dev]
 ```
 
 To use the package you also need a running postgres database with the timescaleDB extension. You can use the `docker-compose.yml` file in the example folder or start a Docker container with the `timescale/timescaledb:latest-pg17` image.

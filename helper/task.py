@@ -43,7 +43,7 @@ def check_valid_task_with_parameters(task: Callable[..., Any], *parameters: Any)
             f"task expects {param_count} parameters, got {len(parameters)}"
         )
 
-    param_types: list[Type[Any]] = []
+    param_types: List[Type[Any]] = []
     for param in sig.parameters.values():
         param_types.append(param.annotation)
 
@@ -103,7 +103,7 @@ def get_input_parameters_from_task(task: Callable[..., Any]) -> List[Type[Any]]:
     check_valid_task(task)
 
     sig = inspect.signature(task)
-    input_parameters: list[Type[Any]] = []
+    input_parameters: List[Type[Any]] = []
 
     for param in sig.parameters.values():
         input_parameters.append(param.annotation)
@@ -123,7 +123,7 @@ def get_output_parameters_from_task(task: Callable[..., Any]) -> List[Type[Any]]
     check_valid_task(task)
 
     sig = inspect.signature(task)
-    output_parameters: list[Type[Any]] = []
+    output_parameters: List[Type[Any]] = []
     return_annotation = sig.return_annotation
 
     # Check if it's a tuple type (multiple returns)
@@ -140,8 +140,8 @@ def get_output_parameters_from_task(task: Callable[..., Any]) -> List[Type[Any]]
 
 def validate_task_signature(
     task: Callable[..., Any],
-    expected_inputs: list[Type[Any]] = [],
-    expected_outputs: list[Type[Any]] = [],
+    expected_inputs: List[Type[Any]] = [],
+    expected_outputs: List[Type[Any]] = [],
 ) -> bool:
     """
     Validate that a task has the expected input and output signature.

@@ -4,6 +4,7 @@ Clean async implementation tests.
 """
 
 import asyncio
+from typing import Any, List
 import pytest
 import psycopg
 
@@ -16,12 +17,12 @@ from helper.error import QueuerError
 class TestQueuerListenerWithContainer(DatabaseTestMixin):
     """Test class for async QueuerListener functionality using real PostgreSQL containers."""
 
-    def setup_method(self):
+    def setup_method(self, method: Any = None):
         """Set up test environment with real PostgreSQL container."""
         super().setup_method()
-        self._test_listeners: list[QueuerListener] = []
+        self._test_listeners: List[QueuerListener] = []
 
-    def teardown_method(self):
+    def teardown_method(self, method: Any = None):
         """Clean up test environment."""
         super().teardown_method()
 
@@ -91,7 +92,7 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
     @pytest.mark.asyncio
     async def test_listen_for_real_notifications(self):
         """Test that listener receives real PostgreSQL notifications."""
-        received_notifications: list[str] = []
+        received_notifications: List[str] = []
 
         async def async_callback(payload: str):
             received_notifications.append(payload)
@@ -142,7 +143,7 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
     @pytest.mark.asyncio
     async def test_listen_with_multiple_notifications(self):
         """Test listener handles multiple notifications correctly."""
-        received_notifications: list[str] = []
+        received_notifications: List[str] = []
 
         async def async_callback(payload: str):
             received_notifications.append(payload)
@@ -197,7 +198,7 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
     @pytest.mark.asyncio
     async def test_listen_ignores_other_channels(self):
         """Test that listener only processes notifications for its channel."""
-        received_notifications: list[str] = []
+        received_notifications: List[str] = []
 
         async def async_callback(payload: str):
             received_notifications.append(payload)
@@ -257,7 +258,7 @@ class TestQueuerListenerWithContainer(DatabaseTestMixin):
         self._test_listeners.append(listener)
 
         # Track that no notifications are processed
-        received_notifications: list[str] = []
+        received_notifications: List[str] = []
 
         async def async_callback(payload: str):
             received_notifications.append(payload)

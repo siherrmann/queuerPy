@@ -3,6 +3,7 @@ Test for Worker Database Handler using testcontainers.
 Mirrors Go's dbWorker_test.go test suite.
 """
 
+from typing import List
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -128,7 +129,7 @@ class TestWorkerDBHandler(DatabaseTestMixin, unittest.TestCase):
             WorkerStatus.STOPPED,
             WorkerStatus.READY,
         ]
-        workers: list[Worker] = []
+        workers: List[Worker] = []
 
         for i, status in enumerate(statuses):
             worker = Worker(

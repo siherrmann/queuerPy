@@ -2,6 +2,7 @@
 Test cases for the goless-based listener - mirrors Go tests.
 """
 
+from typing import List
 import unittest
 import threading
 import time
@@ -29,7 +30,7 @@ class TestListener(unittest.TestCase):
         listener = Listener(broadcaster)
 
         data = "test data"
-        received_data: list[str] = []
+        received_data: List[str] = []
 
         def notify_function(d: str):
             received_data.append(d)
@@ -82,7 +83,7 @@ class TestListener(unittest.TestCase):
         broadcaster = Broadcaster[str]("testBroadcaster")
         listener = Listener(broadcaster)
 
-        processed_count: list[str] = []
+        processed_count: List[str] = []
         processing_started = threading.Event()
 
         def slow_notify_function(data: str):

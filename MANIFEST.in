@@ -1,0 +1,35 @@
+# Include important documentation and configuration files
+include README.md
+include LICENSE
+include pyproject.toml
+
+# Include SQL files that are needed for database setup
+recursive-include sql *.sql
+
+# Include type stubs if any
+recursive-include typings *.pyi
+
+# Exclude unnecessary files and directories
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .coverage
+global-exclude coverage.xml
+global-exclude coverage-badge.svg
+
+# Exclude test files
+recursive-exclude * *_test.py
+recursive-exclude * test_*.py
+exclude pytest.ini
+
+# Exclude development and build artifacts
+exclude .git*
+exclude .vscode
+exclude .pytest_cache
+exclude .venv
+prune __pycache__
+prune .pytest_cache
+prune .venv
+prune .git
+
+# Exclude example directory if you don't want it in the package
+# recursive-exclude example *

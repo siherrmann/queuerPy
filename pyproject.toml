@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "queuerPy"
+version = "0.1.0"
+description = "A Python implementation of the queuer system - a job queuing and processing system with PostgreSQL backend"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Simon Herrmann", email = "siherrmann@users.noreply.github.com"}
+]
+maintainers = [
+    {name = "Simon Herrmann", email = "siherrmann@users.noreply.github.com"}
+]
+keywords = ["queue", "job", "task", "postgresql", "worker", "async"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: Database",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "psycopg[binary]>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "testcontainers[postgres]>=3.7.0",
+]
+test = [
+    "testcontainers[postgres]>=3.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/siherrmann/queuerPy"
+Repository = "https://github.com/siherrmann/queuerPy"
+Issues = "https://github.com/siherrmann/queuerPy/issues"
+Documentation = "https://github.com/siherrmann/queuerPy#readme"
+
+[tool.setuptools]
+py-modules = ["queuer", "queuer_global", "queuer_job", "queuer_listener", "queuer_next_interval", "queuer_task", "_version"]
+packages = ["core", "database", "helper", "model"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.setuptools.package-data]
+"*" = ["*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["*_test.py", "test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--disable-warnings",
+    "--tb=short"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests"
+]
+asyncio_mode = "strict"

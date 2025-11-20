@@ -2,7 +2,7 @@
 Simple tests for the ticker implementation.
 """
 
-from typing import Any
+from typing import Any, List
 import unittest
 import time
 import threading
@@ -13,8 +13,8 @@ from core.ticker import Ticker
 # Shared variables for testing (using threading-safe approach)
 _test_counter = 0
 _test_lock = threading.Lock()
-_test_times: list[float] = []
-_test_params: list[Any] = []
+_test_times: List[float] = []
+_test_params: List[Any] = []
 
 
 def _reset_test_data():

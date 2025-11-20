@@ -2,6 +2,7 @@
 Simple tests for the scheduler implementation.
 """
 
+from typing import List
 import unittest
 import time
 from datetime import datetime, timedelta
@@ -13,7 +14,7 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_immediate_execution(self):
         """Test scheduler with immediate execution (None start_time)."""
-        executed: list[str] = []
+        executed: List[str] = []
 
         def test_task(message: str) -> None:
             executed.append(message)
@@ -29,7 +30,7 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_delayed_execution(self):
         """Test scheduler with delayed execution."""
-        executed: list[tuple[str, float]] = []
+        executed: List[tuple[str, float]] = []
         start_time = time.time()
 
         def test_task(message: str) -> None:
@@ -56,7 +57,7 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_past_time_execution(self):
         """Test scheduler with past time (should execute immediately)."""
-        executed: list[str] = []
+        executed: List[str] = []
 
         def test_task(message: str) -> None:
             executed.append(message)
@@ -74,7 +75,7 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_with_multiple_args(self):
         """Test scheduler with multiple positional arguments."""
-        executed: list[int] = []
+        executed: List[int] = []
 
         def test_task(a: int, b: int, c: int) -> None:
             executed.append(a + b + c)
@@ -89,7 +90,7 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_with_no_parameters(self):
         """Test scheduler with task that takes no parameters."""
-        executed: list[str] = []
+        executed: List[str] = []
 
         def test_task() -> None:
             executed.append("no_params")

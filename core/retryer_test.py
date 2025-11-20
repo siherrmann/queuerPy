@@ -5,6 +5,7 @@ These tests verify retry functionality with various backoff strategies.
 """
 
 import time
+from typing import List
 import pytest
 from unittest.mock import Mock
 from core.retryer import Retryer
@@ -67,7 +68,7 @@ class TestRetryer:
     @pytest.mark.asyncio
     async def test_linear_backoff(self):
         """Test linear backoff strategy."""
-        call_times: list[float] = []
+        call_times: List[float] = []
 
         def failing_function():
             call_times.append(time.time())
@@ -89,7 +90,7 @@ class TestRetryer:
     @pytest.mark.asyncio
     async def test_exponential_backoff(self):
         """Test exponential backoff strategy."""
-        call_times: list[float] = []
+        call_times: List[float] = []
 
         def failing_function():
             call_times.append(time.time())
@@ -126,7 +127,7 @@ class TestRetryer:
     @pytest.mark.asyncio
     async def test_no_backoff_strategy(self):
         """Test no backoff strategy (immediate retries)."""
-        call_times: list[float] = []
+        call_times: List[float] = []
 
         def failing_function():
             call_times.append(time.time())
