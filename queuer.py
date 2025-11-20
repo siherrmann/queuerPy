@@ -14,27 +14,14 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Callable, Any
 from uuid import UUID
 
-
-# Local imports - database components
 from core.ticker import Ticker
+from core.runner import Runner, SmallRunner, go_func
 from database.db_listener import QueuerListener, new_queuer_db_listener
-
-# Local imports - core components
-from core.listener import Listener
-from core.runner import Runner, SmallRunner
-
-from core.runner import Runner, go_func
-
-# Local imports - model classes
 from helper.logging import get_logger
+from helper.database import DatabaseConfiguration
 from model.job import Job, JobStatus
 from model.worker import Worker, new_worker, new_worker_with_options, WorkerStatus
 from model.options_on_error import OnError
-
-# Local imports - helper components
-from helper.database import DatabaseConfiguration
-
-# Local imports - mixins
 from queuer_job import QueuerJobMixin
 from queuer_task import QueuerTaskMixin
 from queuer_next_interval import QueuerNextIntervalMixin
@@ -155,8 +142,12 @@ class Queuer(
         else:
             new_worker_obj: Worker = new_worker(name, max_concurrency)
 
-        self.worker: Worker = self.db_worker.insert_worker(new_worker_obj)
-        self.worker_mutex: threading.RLock = threading.RLock()
+        try:
+            self.worker: Worker = self.db_worker.insert_worker(new_worker_obj)
+            self.worker_mutex: threading.RLock = threading.RLock()
+        except Exception as e:
+            logger.error(f"Error inserting worker into database: {e}")
+            raise RuntimeError(f"Error inserting worker into database: {e}")
 
         logger.info(
             f"Queuer with worker created: {new_worker_obj.name} (RID: {self.worker.rid})"
@@ -186,19 +177,6 @@ class Queuer(
             logger.error(f"Error creating database listeners: {e}")
             raise RuntimeError(f"Error creating database listeners: {e}")
 
-        # Broadcasters for job updates and deletes
-        # Use singleton broadcasters so all queuer instances share the same broadcasters
-        try:
-            if self.job_insert_broadcaster:
-                self.job_insert_listener = Listener[Job](self.job_insert_broadcaster)
-            if self.job_update_broadcaster:
-                self.job_update_listener = Listener[Job](self.job_update_broadcaster)
-            if self.job_delete_broadcaster:
-                self.job_delete_listener = Listener[Job](self.job_delete_broadcaster)
-        except Exception as e:
-            logger.error(f"Error creating job broadcasters: {e}")
-            raise RuntimeError(f"Error creating job broadcasters: {e}")
-
         # Ensure database is connected (reconnect if it was closed by a previous stop())
         try:
             if not self.database.instance:
@@ -208,7 +186,7 @@ class Queuer(
             logger.error(f"Error reconnecting to database: {e}")
             raise RuntimeError(f"Error reconnecting to database: {e}")
 
-        # Update worker status to running (or recreate if it doesn't exist)
+        # Update worker status to running
         try:
             with self.worker_mutex:
                 self.worker.status = WorkerStatus.RUNNING

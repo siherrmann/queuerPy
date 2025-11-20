@@ -97,6 +97,7 @@ class WorkerDBHandler:
             )
             row = cur.fetchone()
             if row:
+                self.db.instance.commit()  # Commit the transaction
                 return Worker.from_row(row)
 
             raise RuntimeError("Failed to insert worker")
@@ -133,6 +134,7 @@ class WorkerDBHandler:
                 )
                 row = cur.fetchone()
                 if row:
+                    self.db.instance.commit()  # Commit the transaction
                     return Worker.from_row(row)
             except Exception:
                 raise RuntimeError("Failed to update worker using SQL function")
@@ -160,6 +162,8 @@ class WorkerDBHandler:
                 ),
             )
             result = cur.fetchone()
+            if result and result[0] > 0:
+                self.db.instance.commit()  # Commit if workers were updated
             return result[0] if result else 0
 
     def delete_worker(self, rid: UUID) -> None:
