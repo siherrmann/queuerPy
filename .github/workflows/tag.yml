@@ -1,0 +1,29 @@
+name: Run auto tagging
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  Patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0  # Fetch full history for proper tagging
+      
+      - name: Minor version for each merge
+        uses: anothrNick/github-tag-action@1.73.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: minor
+          TAG_PREFIX: v
+          WITH_V: true
+          RELEASE_BRANCHES: main
+          INITIAL_VERSION: 0.1.0
