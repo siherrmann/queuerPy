@@ -53,6 +53,12 @@ from helper.error import (
     QueuerError,
 )
 
+# Import submodules for direct access
+from . import core
+from . import database
+from . import helper
+from . import model
+
 # Convenience imports for common use cases
 __all__ = [
     # Core classes
@@ -70,6 +76,11 @@ __all__ = [
     "RetryBackoff",
     # Exceptions
     "QueuerError",
+    # Submodules
+    "core",
+    "database",
+    "helper",
+    "model",
     # Version info
     "__version__",
     "__author__",

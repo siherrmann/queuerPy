@@ -59,7 +59,6 @@ Documentation = "https://github.com/siherrmann/queuerPy#readme"
 
 [tool.setuptools]
 packages = ["queuerPy", "queuerPy.core", "queuerPy.database", "queuerPy.helper", "queuerPy.model", "queuerPy.sql"]
-py-modules = ["queuer", "queuer_global", "queuer_job", "queuer_listener", "queuer_next_interval", "queuer_task", "_version"]
 
 [tool.setuptools.package-dir]
 "queuerPy" = "."
