@@ -17,8 +17,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          apt-get update
-          apt-get install -y iptables sudo
+          sudo apt-get update
+          sudo apt-get install -y iptables
 
       - name: Set up Docker
         uses: docker/setup-docker-action@v4
