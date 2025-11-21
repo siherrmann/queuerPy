@@ -10,38 +10,46 @@ A job queuing and processing system with PostgreSQL backend that provides:
 - Event-driven notifications
 """
 
-from ._version import __version__
+import sys
+import os
+
+# Add the package directory to Python path to enable direct imports
+_package_dir = os.path.dirname(__file__)
+if _package_dir not in sys.path:
+    sys.path.insert(0, _package_dir)
+
+from _version import __version__
 
 __author__ = "Simon Herrmann"
 __email__ = "siherrmann@users.noreply.github.com"
 
 # Core exports
-from .queuer import (
+from queuer import (
     Queuer,
     new_queuer,
     new_queuer_with_db,
 )
 
-from .helper.database import (
+from helper.database import (
     DatabaseConfiguration,
 )
 
-from .model.job import (
+from model.job import (
     Job,
     JobStatus,
 )
 
-from .model.worker import (
+from model.worker import (
     Worker,
     WorkerStatus,
 )
 
-from .model.options_on_error import (
+from model.options_on_error import (
     OnError,
     RetryBackoff,
 )
 
-from .helper.error import (
+from helper.error import (
     QueuerError,
 )
 

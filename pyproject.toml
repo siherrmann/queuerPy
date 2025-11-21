@@ -59,11 +59,11 @@ Issues = "https://github.com/siherrmann/queuerPy/issues"
 Documentation = "https://github.com/siherrmann/queuerPy#readme"
 
 [tool.setuptools]
+packages = ["queuerPy"]
 py-modules = ["queuer", "queuer_global", "queuer_job", "queuer_listener", "queuer_next_interval", "queuer_task", "_version"]
-packages = ["core", "database", "helper", "model"]
 
 [tool.setuptools.package-dir]
-"" = "."
+"queuerPy" = "."
 
 [tool.setuptools.package-data]
 "*" = ["*.sql"]
