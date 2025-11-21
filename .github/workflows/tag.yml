@@ -21,6 +21,7 @@ jobs:
           fetch-depth: 0 # Fetch full history for proper tagging
 
       - name: Minor version for each merge
+        id: tag
         uses: anothrNick/github-tag-action@1.73.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -29,3 +30,32 @@ jobs:
           WITH_V: true
           RELEASE_BRANCHES: main
           INITIAL_VERSION: 0.1.0
+
+      - name: Update version files
+        if: ${{ steps.tag.outputs.new_tag != '' }}
+        run: |
+          NEW_VERSION=${{ steps.tag.outputs.new_tag }}
+          # Remove 'v' prefix if present
+          VERSION=${NEW_VERSION#v}
+
+          echo "Updating version files to: $VERSION"
+
+          # Update _version.py
+          sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" _version.py
+
+          # Update pyproject.toml
+          sed -i "s/version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+
+          echo "Updated files:"
+          cat _version.py
+          grep "version =" pyproject.toml
+
+      - name: Commit version updates
+        if: ${{ steps.tag.outputs.new_tag != '' }}
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update version to ${{ steps.tag.outputs.new_tag }}"
+          file_pattern: "_version.py pyproject.toml"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
