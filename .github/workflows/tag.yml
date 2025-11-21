@@ -1,12 +1,10 @@
 name: Run auto tagging
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["Run Tests"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -14,6 +12,7 @@ permissions:
 jobs:
   Patch:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4

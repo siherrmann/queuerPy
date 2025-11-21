@@ -5,10 +5,14 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Run auto tagging"]
+    types: [completed]
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
 
     steps:
       - name: Checkout code

@@ -7,7 +7,7 @@ name = "queuerPy"
 version = "0.1.0"
 description = "A Python implementation of the queuer system - a job queuing and processing system with PostgreSQL backend"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "Apache-2.0"
 authors = [
     {name = "Simon Herrmann", email = "siherrmann@users.noreply.github.com"}
 ]
@@ -18,7 +18,6 @@ keywords = ["queue", "job", "task", "postgresql", "worker", "async"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -59,13 +58,19 @@ Issues = "https://github.com/siherrmann/queuerPy/issues"
 Documentation = "https://github.com/siherrmann/queuerPy#readme"
 
 [tool.setuptools]
-packages = ["queuerPy"]
+packages = ["queuerPy", "queuerPy.core", "queuerPy.database", "queuerPy.helper", "queuerPy.model", "queuerPy.sql"]
 py-modules = ["queuer", "queuer_global", "queuer_job", "queuer_listener", "queuer_next_interval", "queuer_task", "_version"]
 
 [tool.setuptools.package-dir]
 "queuerPy" = "."
+"queuerPy.core" = "core"
+"queuerPy.database" = "database"
+"queuerPy.helper" = "helper"
+"queuerPy.model" = "model"
+"queuerPy.sql" = "sql"
 
 [tool.setuptools.package-data]
+"queuerPy" = ["sql/*.sql"]
 "*" = ["*.sql"]
 
 [tool.pytest.ini_options]

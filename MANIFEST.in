@@ -2,6 +2,13 @@
 include README.md
 include LICENSE
 include pyproject.toml
+include _version.py
+
+# Include all Python modules and packages
+recursive-include core *.py
+recursive-include database *.py
+recursive-include helper *.py
+recursive-include model *.py
 
 # Include SQL files that are needed for database setup
 recursive-include sql *.sql
