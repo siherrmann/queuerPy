@@ -1,7 +1,9 @@
+import threading
 from typing import Any, Callable, Dict, Optional
 from core.broadcaster import new_broadcaster
 from core.listener import Listener
 from database.db_job import JobDBHandler
+from database.db_master import MasterDBHandler
 from database.db_worker import WorkerDBHandler
 from helper.database import Database, DatabaseConfiguration, new_database
 from helper.logging import get_logger
@@ -16,9 +18,13 @@ class QueuerGlobalMixin:
     def __init__(self):
         self.running: bool = False
 
-        # DB
+        # Worker mutex for thread-safe access
+        self.worker_mutex: threading.RLock = threading.RLock()
+
+        # DB Handlers
         self.db_job: JobDBHandler
         self.db_worker: WorkerDBHandler
+        self.db_master: MasterDBHandler
 
         # Broadcaster
         self.job_insert_broadcaster = new_broadcaster("job.INSERT")
@@ -52,5 +58,8 @@ class QueuerGlobalMixin:
             self.database, db_config.with_table_drop, encryption_key
         )
         self.db_worker: WorkerDBHandler = WorkerDBHandler(
+            self.database, db_config.with_table_drop
+        )
+        self.db_master: MasterDBHandler = MasterDBHandler(
             self.database, db_config.with_table_drop
         )

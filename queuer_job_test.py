@@ -386,9 +386,9 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
         finished_job = queuer.wait_for_job_finished(job.rid, timeout_seconds=15.0)
         if finished_job:
             self.assertEqual(finished_job.status, "SUCCEEDED")
-            self.assertEqual(finished_job.results, 3)
+            self.assertEqual(finished_job.results, [3])
             self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
-            self.assertEqual(finished_job.results, 3)
+            self.assertEqual(finished_job.results, [3])
 
         with self.assertRaises(Exception):
             queuer.get_job(job.rid)
@@ -414,7 +414,7 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
 
         final_job = queuer.get_job_ended(job.rid)
         self.assertEqual(final_job.status, JobStatus.SUCCEEDED)
-        self.assertEqual(final_job.results, 7)
+        self.assertEqual(final_job.results, [7])
 
         queuer.stop()
 

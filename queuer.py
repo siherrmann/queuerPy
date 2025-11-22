@@ -21,11 +21,13 @@ from helper.logging import get_logger
 from helper.database import DatabaseConfiguration
 from model.job import Job, JobStatus
 from model.worker import Worker, new_worker, new_worker_with_options, WorkerStatus
+from model.master import MasterSettings
 from model.options_on_error import OnError
 from queuer_job import QueuerJobMixin
 from queuer_task import QueuerTaskMixin
 from queuer_next_interval import QueuerNextIntervalMixin
 from queuer_listener import QueuerListenerMixin
+from queuer_master import QueuerMasterMixin
 
 logger = get_logger(__name__)
 
@@ -65,6 +67,7 @@ class Queuer(
     QueuerTaskMixin,
     QueuerNextIntervalMixin,
     QueuerListenerMixin,
+    QueuerMasterMixin,
 ):
     """
     Main queuing system class.
@@ -144,7 +147,6 @@ class Queuer(
 
         try:
             self.worker: Worker = self.db_worker.insert_worker(new_worker_obj)
-            self.worker_mutex: threading.RLock = threading.RLock()
         except Exception as e:
             logger.error(f"Error inserting worker into database: {e}")
             raise RuntimeError(f"Error inserting worker into database: {e}")
@@ -153,7 +155,7 @@ class Queuer(
             f"Queuer with worker created: {new_worker_obj.name} (RID: {self.worker.rid})"
         )
 
-    def start(self):
+    def start(self, master_settings: Optional[MasterSettings] = None):
         """Start the queuer."""
         if self.running:
             raise RuntimeError("Queuer is already running")
@@ -205,6 +207,10 @@ class Queuer(
 
         self._start_heartbeat_ticker()
         self._start_poll_job_ticker()  # Backup polling every 5 minutes
+
+        # Start master polling if master settings provided
+        if master_settings:
+            self.poll_master_ticker(master_settings)
 
         logger.info("Queuer started")
 

@@ -120,7 +120,11 @@ class QueuerJobMixin(QueuerGlobalMixin):
         channel: BroadcasterQueue[Job] = await self.job_insert_broadcaster.subscribe()
         try:
             job = await asyncio.wait_for(channel.get(), timeout=timeout_seconds)
-            return job
+            job_added = self.get_job(job.rid)
+            if not job_added:
+                raise Exception(f"Job added not found: {job.rid}")
+
+            return job_added
         except asyncio.TimeoutError:
             logger.debug(f"Timed out waiting for job added ({timeout_seconds}s)")
             return None
@@ -172,7 +176,11 @@ class QueuerJobMixin(QueuerGlobalMixin):
             while True:
                 job = await asyncio.wait_for(channel.get(), timeout=timeout_seconds)
                 if job.rid == job_rid:
-                    return job
+                    complete_job = self.get_job_ended(job_rid)
+                    if not complete_job:
+                        raise Exception(f"Ended job not found: {job_rid}")
+
+                    return complete_job
         except asyncio.TimeoutError:
             logger.debug(f"Timed out waiting for job ended ({timeout_seconds}s)")
             try:
@@ -184,7 +192,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         except Exception as e:
             raise QueuerError("waiting for job", e)
         finally:
-            await self.job_insert_broadcaster.unsubscribe(channel)
+            await self.job_delete_broadcaster.unsubscribe(channel)
 
     def cancel_job(self, job_rid: UUID) -> Job:
         """
@@ -412,7 +420,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
                 runner.go()
                 results = runner.get_results(timeout=300)
                 logger.debug(f"Runner task {job.task_name} completed: {results}")
-                return results, False, None
+                return [results], False, None
 
             except asyncio.CancelledError:
                 if runner:
@@ -527,6 +535,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         """
         job.status = JobStatus.SUCCEEDED
         job.results = results
+        logger.debug(f"_succeed_job: Setting job {job.rid} results to {results}")
         await self._end_job(job)
 
     async def _fail_job(self, job: Job, job_error: Exception):
@@ -555,7 +564,9 @@ class QueuerJobMixin(QueuerGlobalMixin):
 
         try:
             ended_job = self.db_job.update_job_final(job)
-            logger.debug(f"Job ended: {ended_job.status} - {ended_job.rid}")
+            logger.debug(
+                f"Job ended: {ended_job.status} - {ended_job.rid}, results: {ended_job.results}"
+            )
 
             if (
                 ended_job.options

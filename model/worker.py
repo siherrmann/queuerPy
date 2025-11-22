@@ -97,9 +97,9 @@ class Worker:
 
         worker.name = row.get("output_name", "")
         worker.max_concurrency = row.get("output_max_concurrency", 1)
-        worker.available_tasks = row.get("output_available_tasks", []) or []
-        worker.available_next_interval_funcs = (
-            row.get("output_available_next_interval", []) or []
+        worker.available_tasks = row.get("output_available_tasks", [])
+        worker.available_next_interval_funcs = row.get(
+            "output_available_next_interval", []
         )
         worker.status = row.get("output_status", WorkerStatus.READY)
         worker.created_at = row.get("output_created_at", datetime.now())

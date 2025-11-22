@@ -1,2 +1,0 @@
-# Act configuration using Ubuntu with Docker for testcontainers support
--P ubuntu-latest=catthehacker/ubuntu:act-latest

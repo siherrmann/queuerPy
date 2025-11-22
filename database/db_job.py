@@ -6,7 +6,6 @@ Mirrors Go's database/dbJob.go with psycopg3 and references same SQL functions.
 import json
 from typing import List, Optional
 from uuid import UUID
-from psycopg import Connection
 from psycopg.rows import dict_row
 
 from helper.database import Database
@@ -24,25 +23,25 @@ class JobDBHandler:
 
     def __init__(
         self,
-        db_connection: Optional[Database],
+        db_connection: Database,
         with_table_drop: bool = False,
         encryption_key: str = "",
     ):
         """Initialize job database handler."""
-        if db_connection is None:
-            raise ValueError("Database connection is None")
         self.db: Database = db_connection
+
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
 
         self.encryption_key: str = encryption_key
 
-        # Load SQL functions using helper.sql
-        connection: Connection = self.db.instance
         sql_loader: SQLLoader = SQLLoader()
+        sql_loader.load_notify_sql(self.db.instance, force=with_table_drop)
+        sql_loader.load_job_sql(self.db.instance, force=with_table_drop)
 
-        sql_loader.load_notify_sql(connection, force=with_table_drop)
-        sql_loader.load_job_sql(connection, force=with_table_drop)
+        if with_table_drop:
+            self.drop_tables()
+
         self.create_table()
 
     def check_tables_existence(self) -> bool:
@@ -84,7 +83,8 @@ class JobDBHandler:
 
     def insert_job(self, job: Job) -> Job:
         """
-        Insert a job into the database.
+        Insert a job into the database using SQL function.
+        Note: SQL function only supports basic job creation (no worker assignment, results, or error).
 
         :param job: Job instance to insert.
         :return: Inserted Job instance.
@@ -94,27 +94,7 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                INSERT INTO job (options, task_name, parameters, status, scheduled_at, schedule_count, worker_rid, started_at, results, error)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING
-                    id,
-                    rid,
-                    worker_id,
-                    worker_rid,
-                    options,
-                    task_name,
-                    parameters,
-                    status,
-                    scheduled_at,
-                    schedule_count,
-                    attempts,
-                    started_at,
-                    results,
-                    error,
-                    created_at,
-                    updated_at;
-            """,
+                "SELECT * FROM insert_job(%s, %s, %s, %s, %s, %s);",
                 (
                     json.dumps(job.options.to_dict()) if job.options else None,
                     job.task_name,
@@ -122,10 +102,6 @@ class JobDBHandler:
                     job.status,
                     job.scheduled_at,
                     job.schedule_count,
-                    job.worker_rid,
-                    job.started_at,
-                    json.dumps(job.results) if job.results else None,
-                    job.error,
                 ),
             )
 
@@ -205,26 +181,7 @@ class JobDBHandler:
             results_param = json.dumps(job.results)
             if self.encryption_key:
                 cur.execute(
-                    """
-                    SELECT
-                        output_id as id,
-                        output_rid as rid,
-                        output_worker_id as worker_id,
-                        output_worker_rid as worker_rid,
-                        output_options as options,
-                        output_task_name as task_name,
-                        output_parameters as parameters,
-                        output_status as status,
-                        output_scheduled_at as scheduled_at,
-                        output_started_at as started_at,
-                        output_schedule_count as schedule_count,
-                        output_attempts as attempts,
-                        output_results as results,
-                        output_error as error,
-                        output_created_at as created_at,
-                        output_updated_at as updated_at
-                    FROM update_job_final_encrypted(%s, %s, %s, %s, %s);
-                """,
+                    "SELECT * FROM update_job_final_encrypted(%s, %s, %s, %s, %s);",
                     (
                         job.id,
                         job.status,
@@ -235,26 +192,7 @@ class JobDBHandler:
                 )
             else:
                 cur.execute(
-                    """
-                    SELECT
-                        output_id as id,
-                        output_rid as rid,
-                        output_worker_id as worker_id,
-                        output_worker_rid as worker_rid,
-                        output_options as options,
-                        output_task_name as task_name,
-                        output_parameters as parameters,
-                        output_status as status,
-                        output_scheduled_at as scheduled_at,
-                        output_started_at as started_at,
-                        output_schedule_count as schedule_count,
-                        output_attempts as attempts,
-                        output_results as results,
-                        output_error as error,
-                        output_created_at as created_at,
-                        output_updated_at as updated_at
-                    FROM update_job_final(%s, %s, %s, %s);
-                """,
+                    "SELECT * FROM update_job_final(%s, %s, %s, %s);",
                     (job.id, job.status, results_param, job.error),
                 )
 
@@ -288,7 +226,8 @@ class JobDBHandler:
 
     def delete_job(self, rid: UUID):
         """
-        Delete a job by RID.
+        Delete a job by RID using SQL function.
+        Mirrors Go's DeleteJob method.
 
         :param rid: RID of the job to delete.
         """
@@ -296,12 +235,13 @@ class JobDBHandler:
             raise ValueError("Database connection is not established")
 
         with self.db.instance.cursor() as cur:
-            cur.execute("DELETE FROM job WHERE rid = %s;", (rid,))
+            cur.execute("SELECT delete_job(%s);", (rid,))
         self.db.instance.commit()
 
     def select_job(self, rid: UUID) -> Optional[Job]:
         """
-        Select a job by RID. Mirrors Go's SelectJob method.
+        Select a job by RID using SQL function.
+        Mirrors Go's SelectJob method.
 
         :param rid: RID of the job to select.
         :return: Job instance if found, else None.
@@ -311,32 +251,7 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT
-                    id,
-                    rid,
-                    worker_id,
-                    worker_rid,
-                    options,
-                    task_name,
-                    parameters,
-                    status,
-                    scheduled_at,
-                    started_at,
-                    schedule_count,
-                    attempts,
-                    CASE
-                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
-                        ELSE results
-                    END AS results,
-                    error,
-                    created_at,
-                    updated_at
-                FROM
-                    job
-                WHERE
-                    rid = %s;
-            """,
+                "SELECT * FROM select_job(%s, %s);",
                 (self.encryption_key or "", rid),
             )
 
@@ -345,7 +260,8 @@ class JobDBHandler:
 
     def select_all_jobs(self, last_id: int = 0, entries: int = 100) -> List[Job]:
         """
-        Select all jobs with pagination.
+        Select all jobs with pagination using SQL function.
+        Mirrors Go's SelectAllJobs method.
 
         :param last_id: Last job ID from previous page.
         :param entries: Number of entries to retrieve.
@@ -356,13 +272,8 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT * FROM job 
-                WHERE id > %s 
-                ORDER BY id 
-                LIMIT %s;
-            """,
-                (last_id, entries),
+                "SELECT * FROM select_all_jobs(%s, %s, %s);",
+                (self.encryption_key or "", last_id, entries),
             )
 
             jobs: List[Job] = []
@@ -375,7 +286,8 @@ class JobDBHandler:
         self, worker_rid: UUID, last_id: int = 0, entries: int = 100
     ) -> List[Job]:
         """
-        Select all jobs for a specific worker.
+        Select all jobs for a specific worker using SQL function.
+        Mirrors Go's SelectAllJobsByWorkerRid method.
 
         :param worker_rid: RID of the worker.
         :param last_id: Last job ID from previous page.
@@ -387,13 +299,8 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT * FROM job 
-                WHERE worker_rid = %s AND id > %s 
-                ORDER BY id 
-                LIMIT %s;
-            """,
-                (worker_rid, last_id, entries),
+                "SELECT * FROM select_all_jobs_by_worker_rid(%s, %s, %s, %s);",
+                (self.encryption_key or "", worker_rid, last_id, entries),
             )
 
             jobs: List[Job] = []
@@ -406,7 +313,8 @@ class JobDBHandler:
         self, search: str, last_id: int = 0, entries: int = 100
     ) -> List[Job]:
         """
-        Select all jobs filtered by search string. Mirrors Go's SelectAllJobsBySearch method.
+        Select all jobs filtered by search string using SQL function.
+        Mirrors Go's SelectAllJobsBySearch method.
         Searches across 'rid', 'worker_id', 'task_name', and 'status' fields.
 
         :param search: Search string to filter jobs.
@@ -419,54 +327,8 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT
-                    id,
-                    rid,
-                    worker_id,
-                    worker_rid,
-                    options,
-                    task_name,
-                    parameters,
-                    status,
-                    scheduled_at,
-                    started_at,
-                    schedule_count,
-                    attempts,
-                    CASE
-                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
-                        ELSE results
-                    END AS results,
-                    error,
-                    created_at,
-                    updated_at
-                FROM job
-                WHERE (rid::text ILIKE '%%' || %s || '%%'
-                        OR worker_id::text ILIKE '%%' || %s || '%%'
-                        OR task_name ILIKE '%%' || %s || '%%'
-                        OR status ILIKE '%%' || %s || '%%')
-                    AND (0 = %s
-                        OR created_at < (
-                            SELECT
-                                u.created_at
-                            FROM
-                                job AS u
-                            WHERE
-                                u.id = %s))
-                ORDER BY
-                    created_at DESC
-                LIMIT %s;
-            """,
-                (
-                    self.encryption_key or "",
-                    search,
-                    search,
-                    search,
-                    search,
-                    last_id,
-                    last_id,
-                    entries,
-                ),
+                "SELECT * FROM select_all_jobs_by_search(%s, %s, %s, %s);",
+                (self.encryption_key or "", search, last_id, entries),
             )
 
             jobs: List[Job] = []
@@ -478,24 +340,33 @@ class JobDBHandler:
     def add_retention_archive(self, days: int):
         """
         Add retention policy for archive cleanup.
-        Placeholder method - mirrors Go's AddRetentionArchive method.
-        TODO: Implement archive retention policy.
+        Mirrors Go's AddRetentionArchive method.
+
+        :param days: Number of days to retain archived jobs
         """
-        # Placeholder implementation
-        pass
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
+        with self.db.instance.cursor() as cur:
+            cur.execute("SELECT add_retention_archive(%s);", (days,))
+        self.db.instance.commit()
 
     def remove_retention_archive(self):
         """
         Remove retention policy for archive cleanup.
-        Placeholder method - mirrors Go's RemoveRetentionArchive method.
-        TODO: Implement archive retention removal.
+        Mirrors Go's RemoveRetentionArchive method.
         """
-        # Placeholder implementation
-        pass
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
+        with self.db.instance.cursor() as cur:
+            cur.execute("SELECT remove_retention_archive();")
+        self.db.instance.commit()
 
     def select_job_from_archive(self, rid: UUID) -> Optional[Job]:
         """
-        Select a job from archive by RID. Mirrors Go's SelectJobFromArchive method.
+        Select a job from archive by RID using SQL function.
+        Mirrors Go's SelectJobFromArchive method.
 
         :param rid: RID of the job to select.
         :return: Job instance if found, else None.
@@ -505,32 +376,7 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT
-                    id,
-                    rid,
-                    worker_id,
-                    worker_rid,
-                    options,
-                    task_name,
-                    parameters,
-                    status,
-                    scheduled_at,
-                    started_at,
-                    schedule_count,
-                    attempts,
-                    CASE
-                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
-                        ELSE results
-                    END AS results,
-                    error,
-                    created_at,
-                    updated_at
-                FROM
-                    job_archive
-                WHERE
-                    rid = %s;
-            """,
+                "SELECT * FROM select_job_from_archive(%s, %s);",
                 (self.encryption_key or "", rid),
             )
 
@@ -552,42 +398,8 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT
-                    id,
-                    rid,
-                    worker_id,
-                    worker_rid,
-                    options,
-                    task_name,
-                    parameters,
-                    status,
-                    scheduled_at,
-                    started_at,
-                    schedule_count,
-                    attempts,
-                    CASE
-                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
-                        ELSE results
-                    END AS results,
-                    error,
-                    created_at,
-                    updated_at
-                FROM
-                    job_archive
-                WHERE (0 = %s
-                    OR created_at < (
-                        SELECT
-                            d.created_at
-                        FROM
-                            job_archive AS d
-                        WHERE
-                            d.id = %s))
-                ORDER BY
-                    created_at DESC
-                LIMIT %s;
-            """,
-                (self.encryption_key or "", last_id, last_id, entries),
+                "SELECT * FROM select_all_jobs_from_archive(%s, %s, %s);",
+                (self.encryption_key or "", last_id, entries),
             )
 
             jobs: List[Job] = []
@@ -613,54 +425,8 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT
-                    id,
-                    rid,
-                    worker_id,
-                    worker_rid,
-                    options,
-                    task_name,
-                    parameters,
-                    status,
-                    scheduled_at,
-                    started_at,
-                    schedule_count,
-                    attempts,
-                    CASE
-                        WHEN octet_length(results_encrypted) > 0 THEN pgp_sym_decrypt(results_encrypted, %s::text)::jsonb
-                        ELSE results
-                    END AS results,
-                    error,
-                    created_at,
-                    updated_at
-                FROM job_archive
-                WHERE (rid::text ILIKE '%%' || %s || '%%'
-                        OR worker_id::text ILIKE '%%' || %s || '%%'
-                        OR task_name ILIKE '%%' || %s || '%%'
-                        OR status ILIKE '%%' || %s || '%%')
-                    AND (0 = %s
-                        OR created_at < (
-                            SELECT
-                                d.created_at
-                            FROM
-                                job_archive AS d
-                            WHERE
-                                d.id = %s))
-                ORDER BY
-                    created_at DESC
-                LIMIT %s;
-            """,
-                (
-                    self.encryption_key or "",
-                    search,
-                    search,
-                    search,
-                    search,
-                    last_id,
-                    last_id,
-                    entries,
-                ),
+                "SELECT * FROM select_all_jobs_from_archive_by_search(%s, %s, %s, %s);",
+                (self.encryption_key or "", search, last_id, entries),
             )
 
             jobs: List[Job] = []

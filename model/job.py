@@ -129,50 +129,61 @@ class Job:
 
     @classmethod
     def from_row(cls, row: Dict[str, Any]) -> "Job":
-        """Create job from database row."""
+        """Create job from database row. Supports both output_* and raw column names."""
         job = cls()
-        job.id = row.get("id", 0)
+        job.id = row.get("output_id", row.get("id", 0))
 
         # Handle UUID fields - they may come as UUID objects or strings
-        if row.get("rid"):
-            job.rid = row["rid"] if isinstance(row["rid"], UUID) else UUID(row["rid"])
+        rid_value = row.get("output_rid", row.get("rid"))
+        if rid_value:
+            job.rid = rid_value if isinstance(rid_value, UUID) else UUID(rid_value)
 
-        job.worker_id = row.get("worker_id", 0)
+        job.worker_id = row.get("output_worker_id", row.get("worker_id", 0))
 
-        if row.get("worker_rid"):
+        worker_rid_value = row.get("output_worker_rid", row.get("worker_rid"))
+        if worker_rid_value:
             job.worker_rid = (
-                row["worker_rid"]
-                if isinstance(row["worker_rid"], UUID)
-                else UUID(row["worker_rid"])
+                worker_rid_value
+                if isinstance(worker_rid_value, UUID)
+                else UUID(worker_rid_value)
             )
 
-        job.task_name = row.get("task_name", "")
-        job.status = row.get("status", JobStatus.QUEUED)
-        job.scheduled_at = row.get("scheduled_at")
-        job.started_at = row.get("started_at")
-        job.schedule_count = row.get("schedule_count", 0)
-        job.attempts = row.get("attempts", 0)
-        job.error = row.get("error", "")
-        job.created_at = row.get("created_at", datetime.now())
-        job.updated_at = row.get("updated_at", datetime.now())
+        job.task_name = row.get("output_task_name", row.get("task_name", ""))
+        job.status = row.get("output_status", row.get("status", JobStatus.QUEUED))
+        job.scheduled_at = row.get("output_scheduled_at", row.get("scheduled_at"))
+        job.started_at = row.get("output_started_at", row.get("started_at"))
+        job.schedule_count = row.get(
+            "output_schedule_count", row.get("schedule_count", 0)
+        )
+        job.attempts = row.get("output_attempts", row.get("attempts", 0))
+        job.error = row.get("output_error", row.get("error", ""))
+        job.created_at = row.get(
+            "output_created_at", row.get("created_at", datetime.now())
+        )
+        job.updated_at = row.get(
+            "output_updated_at", row.get("updated_at", datetime.now())
+        )
 
-        # Parse JSON fields
-        if row.get("parameters"):
+        # Parse JSON fields - support both naming conventions
+        parameters_value = row.get("output_parameters", row.get("parameters"))
+        if parameters_value:
             job.parameters = (
-                json.loads(row["parameters"])
-                if isinstance(row["parameters"], str)
-                else row["parameters"]
+                json.loads(parameters_value)
+                if isinstance(parameters_value, str)
+                else parameters_value
             )
 
-        if row.get("results") is not None:
+        results_value = row.get("output_results", row.get("results"))
+        if results_value is not None:
             # JSONB columns return Python objects directly, no JSON parsing needed
-            job.results = row["results"]
+            job.results = results_value
 
-        if row.get("options"):
+        options_value = row.get("output_options", row.get("options"))
+        if options_value:
             options_data = (
-                json.loads(row["options"])
-                if isinstance(row["options"], str)
-                else row["options"]
+                json.loads(options_value)
+                if isinstance(options_value, str)
+                else options_value
             )
             job.options = Options.from_dict(options_data)
 

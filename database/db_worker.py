@@ -7,7 +7,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
-from psycopg import Connection
 from psycopg.rows import dict_row
 
 from helper.database import Database
@@ -32,16 +31,12 @@ class WorkerDBHandler:
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
 
-        # Load SQL functions using helper.sql - mirrors Go's LoadWorkerSql
-        connection: Connection = self.db.instance
         sql_loader: SQLLoader = SQLLoader()
-        sql_loader.load_worker_sql(connection, force=with_table_drop)
+        sql_loader.load_worker_sql(self.db.instance, force=with_table_drop)
 
-        # Handle table drop if requested - mirrors Go behavior
         if with_table_drop:
             self.drop_table()
 
-        # Always call create_table - it's safe as it uses IF NOT EXISTS
         self.create_table()
 
     def check_table_existance(self) -> bool:
@@ -180,34 +175,14 @@ class WorkerDBHandler:
 
     def select_worker(self, rid: UUID) -> Optional[Worker]:
         """
-        Select a worker by RID.
+        Select a worker by RID using SQL function.
         Mirrors Go's SelectWorker method.
         """
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                SELECT
-                    id as output_id,
-                    rid as output_rid,
-                    name as output_name,
-                    options as output_options,
-                    available_tasks as output_available_tasks,
-                    available_next_interval as output_available_next_interval,
-                    current_concurrency as output_current_concurrency,
-                    max_concurrency as output_max_concurrency,
-                    status as output_status,
-                    created_at as output_created_at,
-                    updated_at as output_updated_at
-                FROM
-                    worker
-                WHERE
-                    rid = %s;
-            """,
-                (rid,),
-            )
+            cur.execute("SELECT * FROM select_worker(%s);", (rid,))
 
             row = cur.fetchone()
             return Worker.from_row(row) if row else None
@@ -221,35 +196,7 @@ class WorkerDBHandler:
             raise ValueError("Database connection is not established")
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                SELECT
-                    id as output_id,
-                    rid as output_rid,
-                    name as output_name,
-                    options as output_options,
-                    available_tasks as output_available_tasks,
-                    available_next_interval as output_available_next_interval,
-                    max_concurrency as output_max_concurrency,
-                    status as output_status,
-                    created_at as output_created_at,
-                    updated_at as output_updated_at
-                FROM
-                    worker
-                WHERE (0 = %s
-                    OR created_at < (
-                        SELECT
-                            d.created_at
-                        FROM
-                            worker AS d
-                        WHERE
-                            d.id = %s))
-                ORDER BY
-                    created_at DESC
-                LIMIT %s;
-            """,
-                (last_id, last_id, entries),
-            )
+            cur.execute("SELECT * FROM select_all_workers(%s, %s);", (last_id, entries))
 
             workers: List[Worker] = []
             for row in cur.fetchall():
@@ -270,35 +217,8 @@ class WorkerDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                SELECT
-                    id as output_id,
-                    rid as output_rid,
-                    name as output_name,
-                    options as output_options,
-                    available_tasks as output_available_tasks,
-                    available_next_interval as output_available_next_interval,
-                    max_concurrency as output_max_concurrency,
-                    status as output_status,
-                    created_at as output_created_at,
-                    updated_at as output_updated_at
-                FROM worker
-                WHERE (name ILIKE '%%' || %s || '%%'
-                        OR array_to_string(available_tasks, ',') ILIKE '%%' || %s || '%%'
-                        OR status ILIKE '%%' || %s || '%%')
-                    AND (0 = %s
-                        OR created_at < (
-                            SELECT
-                                u.created_at
-                            FROM
-                                worker AS u
-                            WHERE
-                                u.id = %s))
-                ORDER BY
-                    created_at DESC
-                LIMIT %s;
-            """,
-                (search, search, search, last_id, last_id, entries),
+                "SELECT * FROM select_all_workers_by_search(%s, %s, %s);",
+                (search, last_id, entries),
             )
 
             workers: List[Worker] = []
@@ -316,23 +236,17 @@ class WorkerDBHandler:
             raise ValueError("Database connection is not established")
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                SELECT pid, datname, usename, application_name, query, state
-                FROM pg_stat_activity
-                WHERE application_name='queuer';
-            """
-            )
+            cur.execute("SELECT * FROM select_all_connections();")
 
             connections: List[ConnectionModel] = []
             for row in cur.fetchall():
                 connection = ConnectionModel(
-                    pid=row["pid"],
-                    database=row["datname"],
-                    username=row["usename"],
-                    application_name=row["application_name"],
-                    query=row["query"],
-                    state=row["state"],
+                    pid=row["output_pid"],
+                    database=row["output_datname"],
+                    username=row["output_usename"],
+                    application_name=row["output_application_name"],
+                    query=row["output_query"],
+                    state=row["output_state"],
                 )
                 connections.append(connection)
 

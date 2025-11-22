@@ -53,11 +53,37 @@ class SQLLoader:
     """
 
     JOB_FUNCTIONS: List[str] = [
+        "init_job",
+        "insert_job",
         "update_job_initial",
         "update_job_final",
         "update_job_final_encrypted",
+        "update_stale_jobs",
+        "delete_job",
+        "select_job",
+        "select_all_jobs",
+        "select_all_jobs_by_worker_rid",
+        "select_all_jobs_by_search",
+        "select_job_from_archive",
+        "select_all_jobs_from_archive",
+        "select_all_jobs_from_archive_by_search",
     ]
-    WORKER_FUNCTIONS: List[str] = ["insert_worker", "update_worker", "delete_worker"]
+    WORKER_FUNCTIONS: List[str] = [
+        "init_worker",
+        "insert_worker",
+        "update_worker",
+        "delete_worker",
+        "update_stale_workers",
+        "select_worker",
+        "select_all_workers",
+        "select_all_workers_by_search",
+        "select_all_connections",
+    ]
+    MASTER_FUNCTIONS: List[str] = [
+        "init_master",
+        "update_master",
+        "select_master",
+    ]
     NOTIFY_FUNCTIONS: List[str] = ["notify_event"]
 
     def __init__(self, sql_base_path: Optional[str] = None):
@@ -176,3 +202,24 @@ class SQLLoader:
         # Verify functions were created
         if not self.check_functions(connection, self.NOTIFY_FUNCTIONS):
             raise RuntimeError("Not all required notify SQL functions were created")
+
+    def load_master_sql(self, connection: Connection, force: bool = False) -> None:
+        """
+        Load master-related SQL functions. Matches Go LoadMasterSql.
+
+        :param connection: The Psycopg 3 connection object.
+        :param force: If True, forces reloading even if functions exist.
+        :raises RuntimeError: If not all required master SQL functions were created.
+        """
+        # Check if functions already exist (unless force=True)
+        if not force:
+            if self.check_functions(connection, self.MASTER_FUNCTIONS):
+                return
+
+        # Load the SQL file
+        master_sql_path = os.path.join(self.sql_base_path, "master.sql")
+        self.execute_sql_file(connection, master_sql_path)
+
+        # Verify functions were created
+        if not self.check_functions(connection, self.MASTER_FUNCTIONS):
+            raise RuntimeError("Not all required master SQL functions were created")
