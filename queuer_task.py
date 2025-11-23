@@ -4,13 +4,16 @@ Mirrors Go's queuerTask.go functionality.
 """
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TypeVar, overload
 
 from model.task import new_task, new_task_with_name
 from model.task import Task
 from queuer_global import QueuerGlobalMixin
 
 logger = logging.getLogger(__name__)
+
+# TypeVar for maintaining function type through decorator
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 class QueuerTaskMixin(QueuerGlobalMixin):
@@ -88,7 +91,13 @@ class QueuerTaskMixin(QueuerGlobalMixin):
         logger.info(f"Task added: {new_task_obj.name}")
         return new_task_obj
 
-    def task(self, name: Optional[str] = None):
+    @overload
+    def task(self, name: None = None) -> Callable[[F], F]: ...
+
+    @overload
+    def task(self, name: str) -> Callable[[F], F]: ...
+
+    def task(self, name: Optional[str] = None) -> Callable[[F], F]:
         """
         Decorator to register a task function with the queuer.
         This is equivalent to calling add_task() or add_task_with_name().
@@ -103,10 +112,10 @@ class QueuerTaskMixin(QueuerGlobalMixin):
                 return param * 2
 
         :param name: Optional custom name for the task. If not provided, uses function name.
-        :return: The decorator function
+        :return: The decorator function that preserves the original function's type
         """
 
-        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        def decorator(func: F) -> F:
             if name is not None:
                 self.add_task_with_name(func, name)
             else:
