@@ -6,7 +6,7 @@ Mirrors Go's queuerJob.go functionality.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple, Union, Callable, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, Tuple, Union, Callable
 from uuid import UUID
 
 from core.broadcaster import BroadcasterQueue
@@ -15,13 +15,11 @@ from core.retryer import Retryer
 from core.scheduler import Scheduler
 from helper.error import QueuerError
 from helper.task import get_task_name_from_interface
+from model.batch_job import BatchJob
 from model.job import Job, JobStatus, new_job as create_job
 from model.options import Options
 from model.worker import Worker
 from queuer_global import QueuerGlobalMixin
-
-if TYPE_CHECKING:
-    from model.batch_job import BatchJob
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -73,7 +71,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
             logger.error(f"Error adding job with options: {str(e)}")
             raise Exception(f"Adding job: {str(e)}")
 
-    def add_jobs(self, batch_jobs: List["BatchJob"]):
+    def add_jobs(self, batch_jobs: List[BatchJob]):
         """
         Add a batch of jobs to the queue.
 

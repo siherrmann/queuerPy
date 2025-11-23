@@ -3,8 +3,9 @@ Job database handler for Python queuer implementation.
 Mirrors Go's database/dbJob.go with psycopg3 and references same SQL functions.
 """
 
+from datetime import datetime
 import json
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
 from psycopg.rows import dict_row
 
@@ -127,21 +128,44 @@ class JobDBHandler:
         # In full implementation, this would handle explicit transaction context
         return self.insert_job(job)
 
-    def batch_insert_jobs(self, jobs: List[Job]) -> List[Job]:
+    def batch_insert_jobs(self, jobs: List[Job]):
         """
-        Insert multiple jobs in a batch operation.
-        Placeholder method - mirrors Go's BatchInsertJobs method.
-        TODO: Implement efficient batch insert logic.
+        Insert multiple jobs in a batch operation using executemany.
+        Mirrors Go's BatchInsertJobs method with direct INSERT statements.
 
         :param jobs: List of Job instances to insert.
         :return: List of inserted Job instances.
+        :raises QueuerError: If batch insertion fails.
         """
-        # For now, insert jobs one by one
-        # In full implementation, this would use batch SQL operations
-        result_jobs: List[Job] = []
-        for job in jobs:
-            result_jobs.append(self.insert_job(job))
-        return result_jobs
+        if not jobs:
+            return
+
+        if self.db.instance is None:
+            raise ValueError("Database connection is not established")
+
+        try:
+            batch_data: List[Tuple[str, str, str, Optional[datetime]]] = []
+            for job in jobs:
+                options_json = (
+                    json.dumps(job.options.to_dict()) if job.options else "{}"
+                )
+                parameters_json = json.dumps(job.parameters)
+                batch_data.append(
+                    (options_json, job.task_name, parameters_json, job.scheduled_at)
+                )
+
+            with self.db.instance.cursor(row_factory=dict_row) as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO job (options, task_name, parameters, scheduled_at) 
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    batch_data,
+                )
+                self.db.instance.commit()
+        except Exception as e:
+            self.db.instance.rollback()
+            raise QueuerError("batch insert jobs", e)
 
     def update_jobs_initial(self, worker: Worker) -> List[Job]:
         """

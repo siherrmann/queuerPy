@@ -97,3 +97,54 @@ class TestQueuerTask(DatabaseTestMixin, unittest.TestCase):
         self.assertEqual(len(queuer.worker.available_tasks), 2)
 
         queuer.stop()
+
+    def test_task_decorator_without_name(self):
+        """Test the @queuer.task() decorator without specifying a name."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+
+        @queuer.task()
+        def decorated_task(data: str) -> str:
+            """Test task added via decorator."""
+            return f"Decorated: {data}"
+
+        # Verify the task was registered with the function name
+        self.assertIn("decorated_task", queuer.tasks)
+        self.assertIn("decorated_task", queuer.worker.available_tasks)
+
+        # Verify the original function is still callable
+        result = decorated_task("test")
+        self.assertEqual(result, "Decorated: test")
+
+        # Verify the task object is correct
+        task = queuer.tasks["decorated_task"]
+        self.assertEqual(task.name, "decorated_task")
+        self.assertEqual(task.task, decorated_task)
+
+        queuer.stop()
+
+    def test_task_decorator_with_name(self):
+        """Test the @queuer.task(name="custom_name") decorator with a custom name."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+
+        @queuer.task(name="my_custom_task")
+        def some_function(data: str) -> str:
+            """Test task with custom name via decorator."""
+            return f"Custom: {data}"
+
+        # Verify the task was registered with the custom name
+        self.assertIn("my_custom_task", queuer.tasks)
+        self.assertNotIn(
+            "some_function", queuer.tasks
+        )  # Original function name should not be used
+        self.assertIn("my_custom_task", queuer.worker.available_tasks)
+
+        # Verify the original function is still callable
+        result = some_function("test")
+        self.assertEqual(result, "Custom: test")
+
+        # Verify the task object is correct
+        task = queuer.tasks["my_custom_task"]
+        self.assertEqual(task.name, "my_custom_task")
+        self.assertEqual(task.task, some_function)
+
+        queuer.stop()

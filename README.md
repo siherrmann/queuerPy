@@ -43,6 +43,14 @@ q.add_task(example_task)
 q.start()
 ```
 
+You can also add a task with a decorator so the tasks don't have to be added to some central function:
+
+```python
+@queuer.task(name="optionalName")
+def example_task():
+...
+```
+
 That's easy, right? Adding a job is just as easy:
 
 ```python
@@ -286,18 +294,23 @@ worker_jobs = queuer.get_jobs_by_worker_rid(worker.rid)
 
 - **Async/Await Support**: Full asyncio integration with threading fallbacks.
 - **PostgreSQL NOTIFY/LISTEN**: Real-time job notifications without polling overhead.
-- **Batch Job Processing**: Insert job batches efficiently.
-- **Transaction Support**: Insert jobs within transactions for rollback capability.
-- **Error Recovery**: Comprehensive error handling and retry mechanisms.
-- **Multiple Workers**: Multiple queuer instances can run across different services while maintaining job order and isolation.
+- **Batch Job Processing**: Insert job batches efficiently using PostgreSQL's `COPY FROM` feature.
+- **Panic Recovery**: Automatic recovery for all running jobs in case of unexpected failures.
+- **Error Handling**: Comprehensive error handling by checking last output parameter for errors.
+- **Multiple Workers**: Multiple queuer instances can run across different microservices while maintaining job start order and isolation.
 - **Scheduled Jobs**: Support for scheduled and periodic jobs with custom intervals.
 - **Job Lifecycle Management**: Easy functions to get jobs and workers, track job status.
-- **Event Listeners**: Listen for job updates, completion, and deletion events.
-- **Retry Mechanisms**: Configurable retry logic with different backoff strategies.
-- **Custom Scheduling**: Custom NextInterval functions for complex scheduling needs.
-- **Heartbeat System**: Worker heartbeat monitoring and automatic cleanup of stale workers.
+- **Event Listeners**: Listen for job updates, completion, and deletion events (ended jobs).
+- **Job Completion Helpers**: Helper functions to listen for specific finished jobs.
+- **Retry Mechanisms**: Retry mechanism for ended jobs which creates a new job with the same parameters, with configurable retry logic and different backoff strategies.
+- **Custom Scheduling**: Custom NextInterval functions to address custom needs for scheduling (e.g., scheduling with timezone offset).
+- **Master Worker Management**: Automatic master worker setting retention and other central settings. Automatic switch to new master if old worker stops.
+- **Heartbeat System**: Worker heartbeat monitoring and automatic stale worker detection and cancellation by the master.
+- **Encryption Support**: Encryption support for sensitive job data stored in the database.
 - **Database Integration**: Seamless PostgreSQL integration with automatic schema management.
 - **Type Safety**: Full type hints and dataclass-based models for better development experience.
+
+> **Note**: Transactional job insert is the only feature that is not yet implemented in the Python implementation of the queuer.
 
 ---
 
