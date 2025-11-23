@@ -69,7 +69,7 @@ packages = ["queuerPy", "queuerPy.core", "queuerPy.database", "queuerPy.helper",
 "queuerPy.sql" = "sql"
 
 [tool.setuptools.package-data]
-"queuerPy" = ["sql/*.sql"]
+"queuerPy" = ["sql/*.sql", "py.typed"]
 "*" = ["*.sql"]
 
 [tool.pytest.ini_options]
@@ -87,3 +87,20 @@ markers = [
     "integration: marks tests as integration tests"
 ]
 asyncio_mode = "strict"
+
+[tool.pyright]
+include = ["."]
+exclude = ["**/__pycache__"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.8"
+pythonPlatform = "All"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
