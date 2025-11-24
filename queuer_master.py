@@ -6,12 +6,12 @@ Mirrors the Go queuerMaster.go with Python async patterns.
 from datetime import timedelta
 from typing import Optional
 
-from core.runner import go_func
-from core.ticker import Ticker
-from helper.logging import get_logger
-from helper.error import QueuerError
-from model.master import Master, MasterSettings
-from queuer_global import QueuerGlobalMixin
+from .core.runner import go_func
+from .core.ticker import Ticker
+from .helper.logging import get_logger
+from .helper.error import QueuerError
+from .model.master import Master, MasterSettings
+from .queuer_global import QueuerGlobalMixin
 
 logger = get_logger(__name__)
 

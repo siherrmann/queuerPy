@@ -6,8 +6,8 @@ Mirrors Go's model/worker_test.go functionality.
 from typing import Any, Dict, List
 import unittest
 
-from model.worker import Worker, new_worker, new_worker_with_options, WorkerStatus
-from model.options_on_error import OnError, RetryBackoff
+from .worker import Worker, new_worker, new_worker_with_options, WorkerStatus
+from .options_on_error import OnError, RetryBackoff
 
 
 class TestWorker(unittest.TestCase):

@@ -6,7 +6,7 @@ import io
 import logging
 import unittest
 
-from helper.logging import ColorFormatter, QueuerLogger, get_logger, setup_logging
+from .logging import ColorFormatter, QueuerLogger, get_logger, setup_logging
 
 
 class TestColorFormatter(unittest.TestCase):

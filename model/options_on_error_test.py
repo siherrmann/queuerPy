@@ -7,7 +7,8 @@ These tests mirror the Go model tests.
 from typing import Any, Dict
 import pytest
 import json
-from model.options_on_error import OnError, RetryBackoff
+
+from .options_on_error import OnError, RetryBackoff
 
 
 class TestOnError:

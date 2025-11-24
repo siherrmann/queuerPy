@@ -7,9 +7,9 @@ from typing import List
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from database.db_worker import WorkerDBHandler
-from helper.test_database import DatabaseTestMixin
-from model.worker import Worker, WorkerStatus
+from .db_worker import WorkerDBHandler
+from ..helper.test_database import DatabaseTestMixin
+from ..model.worker import Worker, WorkerStatus
 
 
 class TestWorkerDBHandler(DatabaseTestMixin, unittest.TestCase):

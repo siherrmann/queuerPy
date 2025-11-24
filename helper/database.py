@@ -10,8 +10,7 @@ from dataclasses import dataclass
 import psycopg
 from psycopg import Connection, ConnectionInfo, sql
 
-from helper.logging import QueuerLogger
-
+from .logging import QueuerLogger
 from .error import QueuerError
 from .sql import run_ddl
 

@@ -10,13 +10,13 @@ import tempfile
 from pathlib import Path
 from psycopg import errors
 
-from helper.sql import SQLLoader, run_ddl
+from .sql import SQLLoader, run_ddl
 
 
 class TestRunDDL(unittest.TestCase):
     """Test cases for run_ddl function."""
 
-    @patch("helper.sql._DDL_LOCK")
+    @patch("queuerPy.helper.sql._DDL_LOCK")
     def test_run_ddl_success(self, mock_lock: MagicMock):
         """Test successful DDL execution."""
         mock_conn = Mock()
@@ -36,7 +36,7 @@ class TestRunDDL(unittest.TestCase):
         mock_cursor.execute.assert_called_once_with(b"CREATE TABLE test (id INT);")
         mock_conn.commit.assert_called_once()
 
-    @patch("helper.sql.time.sleep")
+    @patch("queuerPy.helper.sql.time.sleep")
     def test_run_ddl_retry_on_deadlock(self, mock_sleep: MagicMock):
         """Test DDL retry on deadlock."""
         mock_conn = Mock()
@@ -206,7 +206,7 @@ class TestSQLLoader(unittest.TestCase):
 
         mock_conn = Mock()
 
-        with patch("helper.sql.run_ddl") as mock_run_ddl:
+        with patch("queuerPy.helper.sql.run_ddl") as mock_run_ddl:
             self.sql_loader.execute_sql_file(mock_conn, str(sql_file))
             mock_run_ddl.assert_called_once_with(mock_conn, sql_content)
 

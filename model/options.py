@@ -6,6 +6,7 @@ Mirrors the Go Options struct with Python types.
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
+
 from .options_on_error import OnError
 
 

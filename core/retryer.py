@@ -6,16 +6,11 @@ for reliable task execution with various backoff strategies.
 """
 
 import logging
-import sys
-import os
 import asyncio
 import inspect
 from typing import Any, Callable, Optional
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from model.options_on_error import OnError, RetryBackoff
+from ..model.options_on_error import OnError, RetryBackoff
 
 
 # Configure logging

@@ -6,9 +6,10 @@ Mirrors Go's queuerNextInterval_test.go functionality.
 import unittest
 import pytest
 from datetime import datetime, timedelta
-from model.worker import Worker
-from queuer import new_queuer_with_db
-from helper.test_database import DatabaseTestMixin
+
+from .model.worker import Worker
+from .queuer import new_queuer_with_db
+from .helper.test_database import DatabaseTestMixin
 
 
 def nifunc_1_test(start: datetime, current_count: int) -> datetime:

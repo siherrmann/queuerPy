@@ -8,8 +8,8 @@ from typing import Any, Dict, List
 import unittest
 from datetime import datetime, timedelta
 
-from model.options import Options, Schedule, new_options
-from model.options_on_error import OnError, RetryBackoff
+from .options import Options, Schedule, new_options
+from .options_on_error import OnError, RetryBackoff
 
 
 class TestOptions(unittest.TestCase):

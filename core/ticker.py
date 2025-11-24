@@ -9,8 +9,8 @@ import time
 from datetime import timedelta
 from typing import Any, Callable, Dict, Optional, Union
 
-from core.runner import Runner, SmallRunner, go_func
-from helper.logging import get_logger
+from .runner import Runner, SmallRunner, go_func
+from ..helper.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -8,10 +8,10 @@ from typing import Any, List
 import pytest
 import psycopg
 
-from database.db_listener import QueuerListener, new_queuer_db_listener
-from helper.database import DatabaseConfiguration
-from helper.test_database import DatabaseTestMixin
-from helper.error import QueuerError
+from .db_listener import QueuerListener, new_queuer_db_listener
+from ..helper.database import DatabaseConfiguration
+from ..helper.test_database import DatabaseTestMixin
+from ..helper.error import QueuerError
 
 
 class TestQueuerListenerWithContainer(DatabaseTestMixin):

@@ -9,8 +9,8 @@ import asyncio
 import threading
 from typing import TypeVar, Generic, Callable, Optional, Any
 
-from core.broadcaster import Broadcaster
-from core.runner import go_func
+from .broadcaster import Broadcaster
+from .runner import go_func
 
 T = TypeVar("T")
 

@@ -62,15 +62,10 @@ packages = ["queuerPy", "queuerPy.core", "queuerPy.database", "queuerPy.helper",
 
 [tool.setuptools.package-dir]
 "queuerPy" = "."
-"queuerPy.core" = "core"
-"queuerPy.database" = "database"
-"queuerPy.helper" = "helper"
-"queuerPy.model" = "model"
-"queuerPy.sql" = "sql"
 
 [tool.setuptools.package-data]
-"queuerPy" = ["sql/*.sql", "py.typed"]
-"*" = ["*.sql"]
+"queuerPy" = ["py.typed"]
+"queuerPy.sql" = ["*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["."]

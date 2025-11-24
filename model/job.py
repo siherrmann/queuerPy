@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import List, Any, Optional, Callable, Dict, Union
 from uuid import UUID, uuid4
 
-from helper.task import get_task_name_from_interface
+from ..helper.task import get_task_name_from_interface
 from .options import Options
 
 

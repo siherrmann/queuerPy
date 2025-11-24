@@ -3,7 +3,7 @@ Simple tests for error handling utilities.
 """
 
 import unittest
-from helper.error import QueuerError
+from .error import QueuerError
 
 
 class TestQueuerError(unittest.TestCase):

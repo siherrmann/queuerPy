@@ -4,12 +4,8 @@ Test cases for the asyncio-based broadcaster - mirrors Go tests.
 
 import unittest
 import asyncio
-import sys
-import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from core.broadcaster import Broadcaster, broadcaster_registry
+from .broadcaster import Broadcaster, broadcaster_registry
 
 
 class TestBroadcaster(unittest.IsolatedAsyncioTestCase):

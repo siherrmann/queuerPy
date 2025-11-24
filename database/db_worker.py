@@ -9,10 +9,10 @@ from typing import List, Optional
 from uuid import UUID
 from psycopg.rows import dict_row
 
-from helper.database import Database
-from helper.sql import SQLLoader, run_ddl
-from model.worker import Worker, WorkerStatus
-from model.connection import Connection as ConnectionModel
+from ..helper.database import Database
+from ..helper.sql import SQLLoader, run_ddl
+from ..model.worker import Worker, WorkerStatus
+from ..model.connection import Connection as ConnectionModel
 
 
 class WorkerDBHandler:

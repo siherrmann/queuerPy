@@ -1,20 +1,22 @@
 """
 Simple example demonstrating the Queuer library matching the Go example structure.
 Shows basic task creation, job processing, and waiting for completion.
+
+Prerequisites:
+1. Install the queuerPy package: pip install queuerPy
+2. Set up a PostgreSQL database
+3. Update the DatabaseConfiguration in QueuerExample.__init__() with your database credentials
+
+Usage:
+    python example.py
 """
 
 import asyncio
 import logging
 import time
-import sys
-import os
-
-# Add the parent directory to the path to import from the queuer module
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Import the queuer and related components
-from queuer import Queuer, new_queuer_with_db
-from helper.test_database import DatabaseTestMixin
+from queuerPy import Queuer, new_queuer_with_db, DatabaseConfiguration
 
 
 def short_task(param1: int, param2: str) -> int:
@@ -44,18 +46,23 @@ def short_task(param1: int, param2: str) -> int:
     return param1 + param2_int
 
 
-class QueuerExample(DatabaseTestMixin):
-    """Example using DatabaseTestMixin for testcontainers integration."""
+class QueuerExample:
+    """Example demonstrating basic Queuer usage with PostgreSQL."""
 
     def __init__(self):
-        """Initialize the example with database setup."""
-        self.setup_class()
-        self.setup_method()
+        """Initialize the example with database configuration."""
+        # Configure your PostgreSQL database connection
+        self.db_config = DatabaseConfiguration(
+            host="localhost",
+            port=5432,
+            username="your_username",
+            password="your_password",
+            database="your_database",
+        )
 
     def cleanup(self):
-        """Clean up database resources."""
-        self.teardown_method()
-        self.teardown_class()
+        """Clean up resources if needed."""
+        pass
 
     async def run_example(self):
         """Run the main example demonstration matching Go structure."""
@@ -64,8 +71,8 @@ class QueuerExample(DatabaseTestMixin):
             q: Queuer = new_queuer_with_db(
                 name="exampleEasyWorker",
                 max_concurrency=3,
-                encryption_key=None,
-                db_config=self.db.config,
+                encryption_key="",  # Optional: add your encryption key here
+                db_config=self.db_config,
             )
             q.add_task(short_task)
             q.start()

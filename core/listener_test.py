@@ -6,13 +6,9 @@ from typing import List
 import unittest
 import threading
 import time
-import sys
-import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from core.broadcaster import Broadcaster
-from core.listener import Listener
+from .broadcaster import Broadcaster
+from .listener import Listener
 
 
 class TestListener(unittest.TestCase):

@@ -8,8 +8,9 @@ import time
 from typing import List
 import pytest
 from unittest.mock import Mock
-from core.retryer import Retryer
-from model.options_on_error import OnError, RetryBackoff
+
+from .retryer import Retryer
+from ..model.options_on_error import OnError, RetryBackoff
 
 
 class TestRetryer:

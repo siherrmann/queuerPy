@@ -9,16 +9,11 @@ import time
 import unittest
 from uuid import uuid4
 
-import sys
-import os
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from queuer import Queuer, new_queuer_with_db
-from model.job import Job, JobStatus
-from model.options import Options
-from model.options_on_error import OnError, RetryBackoff
-from helper.test_database import DatabaseTestMixin
+from .queuer import Queuer, new_queuer_with_db
+from .model.job import Job, JobStatus
+from .model.options import Options
+from .model.options_on_error import OnError, RetryBackoff
+from .helper.test_database import DatabaseTestMixin
 
 
 def task_mock(duration: int, param2: str) -> int:

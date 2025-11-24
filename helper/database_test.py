@@ -6,8 +6,8 @@ import os
 import unittest
 from unittest.mock import patch, Mock, call
 
-from helper.database import DatabaseConfiguration, Database
-from helper.error import QueuerError
+from .database import DatabaseConfiguration, Database
+from .error import QueuerError
 
 
 class TestDatabaseConfiguration(unittest.TestCase):
@@ -195,8 +195,8 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(db.logger, mock_logger)
         self.assertIsNone(db.instance)
 
-    @patch("helper.database.psycopg.connect")
-    @patch("helper.database.run_ddl")
+    @patch("queuerPy.helper.database.psycopg.connect")
+    @patch("queuerPy.helper.database.run_ddl")
     def test_connect_to_database_success(self, mock_run_ddl: Mock, mock_connect: Mock):
         """Test successful database connection."""
         mock_connection = Mock()
@@ -216,7 +216,7 @@ class TestDatabase(unittest.TestCase):
             mock_connection, "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
         )
 
-    @patch("helper.database.psycopg.connect")
+    @patch("queuerPy.helper.database.psycopg.connect")
     def test_connect_to_database_failure(self, mock_connect: Mock):
         """Test database connection failure."""
         original_error = Exception("Connection failed")
@@ -241,8 +241,8 @@ class TestDatabase(unittest.TestCase):
             "Database configuration is required for connection", str(cm.exception)
         )
 
-    @patch("helper.database.psycopg.connect")
-    @patch("helper.database.run_ddl")
+    @patch("queuerPy.helper.database.psycopg.connect")
+    @patch("queuerPy.helper.database.run_ddl")
     def test_auto_connect_enabled(self, mock_run_ddl: Mock, mock_connect: Mock):
         """Test auto-connection on initialization."""
         mock_connection = Mock()
@@ -265,14 +265,14 @@ class TestDatabaseUtilities(unittest.TestCase):
 
     def test_new_database_function_exists(self):
         """Test that new_database function exists and is importable."""
-        from helper.database import new_database
+        from queuerPy.helper.database import new_database
 
         self.assertTrue(callable(new_database))
 
-    @patch("helper.database.Database")
+    @patch("queuerPy.helper.database.Database")
     def test_new_database_creates_instance(self, mock_database_class: Mock):
         """Test new_database function creates Database instance."""
-        from helper.database import new_database
+        from queuerPy.helper.database import new_database, DatabaseConfiguration
 
         mock_instance = Mock()
         mock_database_class.return_value = mock_instance

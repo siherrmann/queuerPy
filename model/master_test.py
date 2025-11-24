@@ -7,7 +7,7 @@ import json
 import unittest
 from typing import Any, Dict
 
-from model.master import Master, MasterSettings
+from .master import Master, MasterSettings
 
 
 class TestMasterSettings(unittest.TestCase):

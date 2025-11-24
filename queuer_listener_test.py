@@ -9,11 +9,12 @@ import time
 from typing import List
 import unittest
 from uuid import uuid4
-from core.runner import go_func
-from helper.logging import get_logger
-from helper.test_database import DatabaseTestMixin
-from queuer import new_queuer_with_db
-from model.job import Job
+
+from .core.runner import go_func
+from .helper.logging import get_logger
+from .helper.test_database import DatabaseTestMixin
+from .queuer import new_queuer_with_db
+from .model.job import Job
 
 logger = get_logger(__name__)
 

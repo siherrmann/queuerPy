@@ -7,10 +7,10 @@ import json
 from typing import Optional
 from psycopg.rows import dict_row
 
-from helper.database import Database
-from helper.sql import SQLLoader, run_ddl
-from model.master import Master, MasterSettings
-from model.worker import Worker
+from ..helper.database import Database
+from ..helper.sql import SQLLoader, run_ddl
+from ..model.master import Master, MasterSettings
+from ..model.worker import Worker
 
 
 class MasterDBHandler:

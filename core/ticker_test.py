@@ -7,7 +7,8 @@ import unittest
 import time
 import threading
 from datetime import timedelta
-from core.ticker import Ticker
+
+from .ticker import Ticker
 
 
 # Shared variables for testing (using threading-safe approach)

@@ -6,9 +6,9 @@ import time
 from datetime import datetime
 from typing import Callable, Dict, Optional, Any, Tuple
 
-from core.runner import go_func
-from helper.logging import get_logger
-from helper.task import check_valid_task_with_parameters
+from .runner import go_func
+from ..helper.logging import get_logger
+from ..helper.task import check_valid_task_with_parameters
 
 logger = get_logger(__name__)
 

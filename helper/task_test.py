@@ -5,7 +5,8 @@ Tests for helper.task module.
 import unittest
 import pytest
 from typing import Any, Callable, Dict, List, Tuple, Union
-from helper.task import (
+
+from .task import (
     check_valid_task,
     check_valid_task_with_parameters,
     get_task_name_from_function,

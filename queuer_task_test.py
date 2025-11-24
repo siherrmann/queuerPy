@@ -5,9 +5,10 @@ Mirrors Go's queuerTask_test.go functionality.
 
 import unittest
 import pytest
-from model.task import Task
-from queuer import new_queuer_with_db
-from helper.test_database import DatabaseTestMixin
+
+from .model.task import Task
+from .queuer import new_queuer_with_db
+from .helper.test_database import DatabaseTestMixin
 
 
 def task_1_test(data: str) -> str:

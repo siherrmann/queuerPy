@@ -9,8 +9,9 @@ import time
 from typing import Any
 import psutil
 from testcontainers.postgres import PostgresContainer
-from helper.database import Database, DatabaseConfiguration
-from helper.logging import get_logger
+
+from .database import Database, DatabaseConfiguration
+from .logging import get_logger
 
 
 logger = get_logger(__name__)

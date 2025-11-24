@@ -2,11 +2,12 @@
 Simple tests for the scheduler implementation.
 """
 
-from typing import List
+from typing import List, Tuple
 import unittest
 import time
 from datetime import datetime, timedelta
-from core.scheduler import Scheduler
+
+from .scheduler import Scheduler
 
 
 class TestScheduler(unittest.TestCase):
@@ -30,7 +31,7 @@ class TestScheduler(unittest.TestCase):
 
     def test_scheduler_delayed_execution(self):
         """Test scheduler with delayed execution."""
-        executed: List[tuple[str, float]] = []
+        executed: List[Tuple[str, float]] = []
         start_time = time.time()
 
         def test_task(message: str) -> None:
@@ -48,12 +49,8 @@ class TestScheduler(unittest.TestCase):
         self.assertEqual(len(executed), 1)
         message, elapsed = executed[0]
         self.assertEqual(message, "delayed")
-        self.assertGreaterEqual(
-            elapsed, 0.25
-        )  # Should have waited at least 0.25 seconds
-        self.assertLessEqual(
-            elapsed, 0.5
-        )  # Should not have waited more than 0.5 seconds
+        self.assertGreaterEqual(elapsed, 0.25)
+        self.assertLessEqual(elapsed, 0.5)
 
     def test_scheduler_past_time_execution(self):
         """Test scheduler with past time (should execute immediately)."""

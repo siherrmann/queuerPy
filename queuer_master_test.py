@@ -7,11 +7,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from queuer import new_queuer
-from model.master import Master, MasterSettings
-from model.worker import new_worker, WorkerStatus
-from model.job import new_job, JobStatus
-from helper.test_database import DatabaseTestMixin
+from .queuer import new_queuer
+from .model.master import Master, MasterSettings
+from .model.worker import new_worker, WorkerStatus
+from .model.job import new_job, JobStatus
+from .helper.test_database import DatabaseTestMixin
 
 
 class TestMasterTicker(DatabaseTestMixin, unittest.TestCase):

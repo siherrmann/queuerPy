@@ -10,7 +10,7 @@ from typing import List, Optional
 from psycopg import Connection, errors
 from pathlib import Path
 
-from helper.logging import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 

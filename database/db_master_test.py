@@ -6,10 +6,10 @@ Mirrors Go's database/dbMaster_test.go with unittest and testcontainers.
 import unittest
 import uuid
 
-from database.db_master import MasterDBHandler
-from helper.test_database import DatabaseTestMixin
-from model.master import MasterSettings
-from model.worker import Worker
+from .db_master import MasterDBHandler
+from ..helper.test_database import DatabaseTestMixin
+from ..model.master import MasterSettings
+from ..model.worker import Worker
 
 
 class TestMasterDBHandler(DatabaseTestMixin, unittest.TestCase):

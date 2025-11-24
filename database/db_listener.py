@@ -9,8 +9,8 @@ from typing import Optional, Callable, Awaitable
 import psycopg
 from psycopg import AsyncConnection
 
-from helper.database import DatabaseConfiguration
-from helper.error import QueuerError
+from ..helper.database import DatabaseConfiguration
+from ..helper.error import QueuerError
 
 
 class QueuerListener:

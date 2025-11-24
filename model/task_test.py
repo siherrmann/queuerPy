@@ -4,10 +4,10 @@ Mirrors Go's model/task_test.go functionality.
 """
 
 import inspect
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 import unittest
 
-from model.task import new_task, new_task_with_name
+from .task import new_task, new_task_with_name
 
 
 class TestTask(unittest.TestCase):
@@ -23,10 +23,10 @@ class TestTask(unittest.TestCase):
         def func_with_input_params(a: int, b: str):
             pass
 
-        def func_with_output_params() -> tuple[int, str]:
+        def func_with_output_params() -> Tuple[int, str]:
             return 1, "test"
 
-        def func_with_multiple_params(a: int, b: str, c: float) -> tuple[bool, str]:
+        def func_with_multiple_params(a: int, b: str, c: float) -> Tuple[bool, str]:
             return True, "result"
 
         test_cases: List[Dict[str, Any]] = [

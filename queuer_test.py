@@ -8,15 +8,15 @@ import time
 from typing import List
 import unittest
 
-from core.runner import SmallRunner, go_func
-from helper.logging import get_logger
-from model.batch_job import BatchJob
-from model.job import Job
-from queuer import new_queuer_with_db
-from helper.test_database import DatabaseTestMixin
-from helper.database import DatabaseConfiguration
-from model.options_on_error import OnError, RetryBackoff
-from model.worker import WorkerStatus
+from .core.runner import SmallRunner, go_func
+from .helper.logging import get_logger
+from .model.batch_job import BatchJob
+from .model.job import Job
+from .queuer import new_queuer_with_db
+from .helper.test_database import DatabaseTestMixin
+from .helper.database import DatabaseConfiguration
+from .model.options_on_error import OnError, RetryBackoff
+from .model.worker import WorkerStatus
 
 logger = get_logger(__name__)
 
@@ -121,7 +121,7 @@ class TestNewQueuer(DatabaseTestMixin, unittest.TestCase):
 
     def test_invalid_database_config(self):
         """Test that invalid database configuration raises error."""
-        from helper.error import QueuerError
+        from queuerPy.helper.error import QueuerError
 
         invalid_config = DatabaseConfiguration(
             host="",  # Invalid empty host

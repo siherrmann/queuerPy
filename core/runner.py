@@ -10,7 +10,7 @@ import traceback
 import queue
 from typing import Callable, Any, Optional, Union
 
-from helper.logging import get_logger
+from ..helper.logging import get_logger
 
 logger = get_logger(__name__)
 

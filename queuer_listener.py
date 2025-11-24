@@ -6,8 +6,8 @@ Mirrors Go's queuerListener.go functionality.
 import logging
 from typing import Callable
 
-from queuer_global import QueuerGlobalMixin
-from model.job import Job
+from .queuer_global import QueuerGlobalMixin
+from .model.job import Job
 
 logger = logging.getLogger(__name__)
 

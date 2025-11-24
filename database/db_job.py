@@ -9,11 +9,11 @@ from typing import List, Optional, Tuple
 from uuid import UUID
 from psycopg.rows import dict_row
 
-from helper.database import Database
-from helper.error import QueuerError
-from helper.sql import SQLLoader, run_ddl
-from model.job import Job
-from model.worker import Worker
+from ..helper.database import Database
+from ..helper.error import QueuerError
+from ..helper.sql import SQLLoader, run_ddl
+from ..model.job import Job
+from ..model.worker import Worker
 
 
 class JobDBHandler:

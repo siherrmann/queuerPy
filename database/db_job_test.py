@@ -7,13 +7,13 @@ import unittest
 from datetime import datetime, timedelta
 from typing import Any, List
 
-from database.db_job import JobDBHandler
-from database.db_worker import WorkerDBHandler
-from helper.test_database import DatabaseTestMixin
-from model.job import Job, JobStatus, new_job
-from model.options import Options, Schedule
-from model.options_on_error import OnError, RetryBackoff
-from model.worker import new_worker
+from .db_job import JobDBHandler
+from .db_worker import WorkerDBHandler
+from ..helper.test_database import DatabaseTestMixin
+from ..model.job import Job, JobStatus, new_job
+from ..model.options import Options, Schedule
+from ..model.options_on_error import OnError, RetryBackoff
+from ..model.worker import new_worker
 
 
 class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):

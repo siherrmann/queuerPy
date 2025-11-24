@@ -6,8 +6,6 @@ import asyncio
 
 from .runner import Runner, SmallRunner, go_func
 
-# Module-level functions for multiprocessing compatibility
-
 
 async def task_async(a: int, b: int) -> int:
     """Async task returning the sum and waiting for <a> seconds."""

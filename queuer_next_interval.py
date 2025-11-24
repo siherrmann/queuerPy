@@ -6,8 +6,8 @@ Mirrors Go's queuerNextInterval.go functionality.
 import logging
 from typing import Any, Callable
 
-from queuer_global import QueuerGlobalMixin
-from model.worker import Worker
+from .queuer_global import QueuerGlobalMixin
+from .model.worker import Worker
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +32,7 @@ class QueuerNextIntervalMixin(QueuerGlobalMixin):
         :raises ValueError: If function is None
         :raises RuntimeError: If function already exists or database update fails
         """
-        from helper.task import get_task_name_from_interface
-
-        if nif is None:
-            raise ValueError("NextIntervalFunc cannot be None")
+        from .helper.task import get_task_name_from_interface
 
         try:
             nif_name = get_task_name_from_interface(nif)

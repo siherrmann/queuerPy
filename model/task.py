@@ -7,7 +7,7 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Callable, List, Any
 
-from helper.error import QueuerError
+from ..helper.error import QueuerError
 
 
 @dataclass

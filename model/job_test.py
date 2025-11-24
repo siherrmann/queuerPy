@@ -8,9 +8,9 @@ from typing import Any, Dict, List
 import unittest
 from datetime import datetime, timedelta
 
-from model.job import Job, new_job, JobStatus
-from model.options import Options, Schedule
-from model.options_on_error import OnError, RetryBackoff
+from .job import Job, new_job, JobStatus
+from .options import Options, Schedule
+from .options_on_error import OnError, RetryBackoff
 
 
 def task_mock(duration: int, param2: str) -> int:
