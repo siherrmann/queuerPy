@@ -11,6 +11,7 @@ A job queuing and processing system with PostgreSQL backend that provides:
 """
 
 from ._version import __version__
+from uuid import UUID
 
 __author__ = "Simon Herrmann"
 __email__ = "siherrmann@users.noreply.github.com"
@@ -31,6 +32,14 @@ from .model.job import (
     JobStatus,
 )
 
+from .model.task import (
+    Task,
+)
+
+from .model.batch_job import (
+    BatchJob,
+)
+
 from .model.worker import (
     Worker,
     WorkerStatus,
@@ -38,6 +47,7 @@ from .model.worker import (
 
 from .model.master import (
     Master,
+    MasterSettings,
 )
 
 from .model.options_on_error import (
@@ -66,11 +76,16 @@ __all__ = [
     # Models
     "Job",
     "JobStatus",
+    "Task",
+    "BatchJob",
     "Worker",
     "WorkerStatus",
     "Master",
+    "MasterSettings",
     "OnError",
     "RetryBackoff",
+    # Standard library types used in API
+    "UUID",
     # Exceptions
     "QueuerError",
     # Submodules

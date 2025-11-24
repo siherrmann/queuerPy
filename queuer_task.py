@@ -4,7 +4,7 @@ Mirrors Go's queuerTask.go functionality.
 """
 
 import logging
-from typing import Any, Callable, Optional, TypeVar, overload
+from typing import Any, Callable, Optional, TypeVar
 
 from .model.task import new_task, new_task_with_name
 from .model.task import Task
