@@ -44,11 +44,11 @@ class Runner(multiprocessing.Process):
         self.is_async = inspect.iscoroutinefunction(task)
         self._result_queue: multiprocessing.Queue[Any] = multiprocessing.Queue(1)
 
-    def go(self):
+    def go(self) -> None:
         """Starts the Runner process in the background."""
         self.start()
 
-    def run(self):
+    def run(self) -> None:
         """
         The main execution method, executed in the child process.
         It executes the assigned task, sends the result to the queue, and exits.
@@ -155,11 +155,11 @@ class SmallRunner(threading.Thread):
         self.is_async = inspect.iscoroutinefunction(task)
         self._result_queue: queue.Queue[Any] = queue.Queue(maxsize=1)
 
-    def go(self):
+    def go(self) -> None:
         """Starts the SmallRunner thread in the background."""
         self.start()
 
-    def run(self):
+    def run(self) -> None:
         """
         The main execution method for the thread.
         """

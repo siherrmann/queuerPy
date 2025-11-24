@@ -58,7 +58,7 @@ class Ticker:
             f"Ticker created: task={task.__name__}, interval={self.interval_seconds}s, use_mp={use_mp}, stop_event_created={id(self._stop_event)}"
         )
 
-    def _ticker_function(self):
+    def _ticker_function(self) -> None:
         """
         The continuous loop function executed by the Runner process/thread.
         It handles all the fixed-rate scheduling logic (sleep math).
@@ -101,7 +101,7 @@ class Ticker:
                     f"Interval {self.interval_seconds}s exceeded. Skipping sleep."
                 )
 
-    def go(self):
+    def go(self) -> None:
         """
         Starts the background runner process/thread, executing the internal scheduling loop.
         """
@@ -113,7 +113,7 @@ class Ticker:
             use_mp=self._use_mp,
         )
 
-    def stop(self):
+    def stop(self) -> None:
         """
         Stops the background runner process/thread.
         """

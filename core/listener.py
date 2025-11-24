@@ -50,7 +50,7 @@ class Listener(Generic[T]):
         self._stop_event = stop_event
 
         # Define the main coroutine that handles subscription and message reception
-        async def _listen_async():
+        async def _listen_async() -> None:
             ch = await self.broadcaster.subscribe()
             if ready_event is not None:
                 ready_event.set()
@@ -67,7 +67,7 @@ class Listener(Generic[T]):
                             self._active_notifications += 1
                             self._completion_event.clear()
 
-                        def process_notification():
+                        def process_notification() -> None:
                             """Executes the user's callback in a separate thread."""
                             try:
                                 notify_function(msg)
@@ -96,7 +96,7 @@ class Listener(Generic[T]):
         Sends notification directly by broadcasting the data in a separate thread.
         """
 
-        async def _notify():
+        async def _notify() -> None:
             await self.broadcaster.broadcast(data)
 
         go_func(_notify, use_mp=False)
@@ -105,7 +105,7 @@ class Listener(Generic[T]):
         """Wait for all notifications to be processed."""
         return self._completion_event.wait(timeout=timeout)
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop listening."""
         if self._stop_event:
             self._stop_event.set()

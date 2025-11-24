@@ -98,7 +98,7 @@ class QueuerLogger:
         self.logger.addHandler(handler)
         self.logger.propagate = False
 
-    def debug(self, message: str, **kwargs: Any):
+    def debug(self, message: str, **kwargs: Any) -> None:
         """
         Log debug message with optional context.
 
@@ -107,7 +107,7 @@ class QueuerLogger:
         """
         self.log_with_context(logging.DEBUG, message, **kwargs)
 
-    def info(self, message: str, **kwargs: Any):
+    def info(self, message: str, **kwargs: Any) -> None:
         """
         Log info message with optional context.
 
@@ -116,7 +116,7 @@ class QueuerLogger:
         """
         self.log_with_context(logging.INFO, message, **kwargs)
 
-    def warning(self, message: str, **kwargs: Any):
+    def warning(self, message: str, **kwargs: Any) -> None:
         """
         Log warning message with optional context.
 
@@ -125,7 +125,9 @@ class QueuerLogger:
         """
         self.log_with_context(logging.WARNING, message, **kwargs)
 
-    def error(self, message: str, error: Optional[Exception] = None, **kwargs: Any):
+    def error(
+        self, message: str, error: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
         """
         Log error message with optional exception and context.
 
@@ -137,7 +139,9 @@ class QueuerLogger:
             message = f"{message}: {error}"
         self.log_with_context(logging.ERROR, message, **kwargs)
 
-    def critical(self, message: str, error: Optional[Exception] = None, **kwargs: Any):
+    def critical(
+        self, message: str, error: Optional[Exception] = None, **kwargs: Any
+    ) -> None:
         """
         Log critical message with optional exception and context.
 
@@ -149,7 +153,7 @@ class QueuerLogger:
             message = f"{message}: {error}"
         self.log_with_context(logging.CRITICAL, message, **kwargs)
 
-    def log_with_context(self, level: int, message: str, **kwargs: Any):
+    def log_with_context(self, level: int, message: str, **kwargs: Any) -> None:
         """
         Log message with additional context information.
 
@@ -164,7 +168,7 @@ class QueuerLogger:
 
         self.logger.log(level, message)
 
-    def set_level(self, level: int):
+    def set_level(self, level: int) -> None:
         """Set the logging level."""
         self.logger.setLevel(level)
 
@@ -214,7 +218,7 @@ class PerformanceLogger:
         self.logger = logger
         self.start_time: Optional[datetime] = None
 
-    def start_timer(self, operation: str):
+    def start_timer(self, operation: str) -> None:
         """Start timing an operation."""
         self.start_time = datetime.now()
         self.logger.debug(f"Started {operation}")
@@ -233,7 +237,9 @@ class PerformanceLogger:
         return duration
 
 
-def time_operation(operation: str, logger: Optional[QueuerLogger] = None):
+def time_operation(
+    operation: str, logger: Optional[QueuerLogger] = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorator to time function execution.
 

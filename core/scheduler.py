@@ -45,7 +45,7 @@ class Scheduler:
         self.kwargs = kwargs
         self.start_time = start_time
 
-    def go(self):
+    def go(self) -> None:
         """
         Start the scheduler to run the task at the specified start time.
         Mirrors Go's Go(ctx) method exactly.
@@ -57,7 +57,7 @@ class Scheduler:
         else:
             duration = 0
 
-        def scheduled_runner_task():
+        def scheduled_runner_task() -> None:
             """
             This synchronous function runs in the SmallRunner thread.
             It executes the delay and then runs the user's task.

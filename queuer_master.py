@@ -51,7 +51,7 @@ class QueuerMasterMixin(QueuerGlobalMixin):
 
         try:
 
-            def ticker_task():
+            def ticker_task() -> None:
                 """Periodic task executed by the master ticker."""
                 try:
                     try:
@@ -129,7 +129,7 @@ class QueuerMasterMixin(QueuerGlobalMixin):
         """
         try:
 
-            def ticker_task():
+            def ticker_task() -> None:
                 """Periodic task that polls for master role."""
                 try:
                     logger.info("Polling master...")

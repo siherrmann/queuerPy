@@ -54,7 +54,7 @@ class MasterDBHandler:
             result = cur.fetchone()
             return bool(result[0]) if result else False
 
-    def create_table(self):
+    def create_table(self) -> None:
         """Create master table. Mirrors Go's CreateTable method."""
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
@@ -63,7 +63,7 @@ class MasterDBHandler:
             cur.execute("SELECT init_master();")
         self.db.instance.commit()
 
-    def drop_table(self):
+    def drop_table(self) -> None:
         """Drop master table. Mirrors Go's DropTable method."""
         if self.db.instance is None:
             raise ValueError("Database connection is not established")

@@ -7,7 +7,7 @@ import inspect
 from typing import Any, Callable, List, Type
 
 
-def check_valid_task(task: Any):
+def check_valid_task(task: Any) -> None:
     """
     Check if the provided task is a valid function.
     Raises ValueError if the task is invalid.
@@ -23,7 +23,9 @@ def check_valid_task(task: Any):
         raise ValueError(f"task must be a function, got {type(task).__name__}")
 
 
-def check_valid_task_with_parameters(task: Callable[..., Any], *parameters: Any):
+def check_valid_task_with_parameters(
+    task: Callable[..., Any], *parameters: Any
+) -> None:
     """
     Check if the provided task and parameters are valid.
     Validates that the task is a valid function and parameters match input types.

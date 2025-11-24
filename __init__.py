@@ -44,6 +44,10 @@ from model.worker import (
     WorkerStatus,
 )
 
+from model.master import (
+    Master,
+)
+
 from model.options_on_error import (
     OnError,
     RetryBackoff,
@@ -72,6 +76,7 @@ __all__ = [
     "JobStatus",
     "Worker",
     "WorkerStatus",
+    "Master",
     "OnError",
     "RetryBackoff",
     # Exceptions

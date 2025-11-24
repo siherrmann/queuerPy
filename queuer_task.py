@@ -91,24 +91,34 @@ class QueuerTaskMixin(QueuerGlobalMixin):
         logger.info(f"Task added: {new_task_obj.name}")
         return new_task_obj
 
-    @overload
-    def task(self, name: None = None) -> Callable[[F], F]: ...
-
-    @overload
-    def task(self, name: str) -> Callable[[F], F]: ...
-
-    def task(self, name: Optional[str] = None) -> Callable[[F], F]:
+    @property
+    def task(self) -> Callable[[F], F]:
         """
         Decorator to register a task function with the queuer.
         This is equivalent to calling add_task() or add_task_with_name().
 
         Usage:
             @queuer.task()
-            def my_task(param1, param2):
+            def example_task(param1, param2):
                 return param1 + param2
 
-            @queuer.task(name="custom_task_name")
-            def my_other_task(param):
+        :return: The decorator function that preserves the original function's type
+        """
+
+        def simple_decorator(func: F) -> F:
+            self.add_task(func)
+            return func
+
+        return simple_decorator
+
+    def task_with_name(self, name: str) -> Callable[[F], F]:
+        """
+        Decorator to register a task function with the queuer.
+        This is equivalent to calling add_task() or add_task_with_name().
+
+        Usage:
+            @queuer.task_with_name(name="custom_task_name")
+            def example_task(param):
                 return param * 2
 
         :param name: Optional custom name for the task. If not provided, uses function name.
@@ -116,10 +126,7 @@ class QueuerTaskMixin(QueuerGlobalMixin):
         """
 
         def decorator(func: F) -> F:
-            if name is not None:
-                self.add_task_with_name(func, name)
-            else:
-                self.add_task(func)
+            self.add_task_with_name(func, name)
             return func
 
         return decorator

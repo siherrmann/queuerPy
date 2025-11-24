@@ -71,7 +71,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
             logger.error(f"Error adding job with options: {str(e)}")
             raise Exception(f"Adding job: {str(e)}")
 
-    def add_jobs(self, batch_jobs: List[BatchJob]):
+    def add_jobs(self, batch_jobs: List[BatchJob]) -> None:
         """
         Add a batch of jobs to the queue.
 
@@ -207,7 +207,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         self._cancel_job(job)
         return job
 
-    def cancel_all_jobs_by_worker(self, worker_rid: UUID, entries: int = 100):
+    def cancel_all_jobs_by_worker(self, worker_rid: UUID, entries: int = 100) -> None:
         """
         Cancel all jobs assigned to a specific worker by its RID.
 
@@ -336,7 +336,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         except Exception as e:
             raise Exception(f"Creating or inserting job: {str(e)}")
 
-    def _run_job_initial(self):
+    def _run_job_initial(self) -> None:
         """
         Called to run the next job in the queue.
         Updates job status to running with worker.
@@ -388,7 +388,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
 
     async def _wait_for_job(
         self, job: Job
-    ) -> tuple[List[Any], bool, Optional[Exception]]:
+    ) -> Tuple[List[Any], bool, Optional[Exception]]:
         """
         Execute the job and return the results or an error.
 
@@ -434,7 +434,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
             logger.error(f"Error setting up runner for task {job.task_name}: {e}")
             return [], False, e
 
-    async def _retry_job(self, job: Job, job_error: Exception):
+    async def _retry_job(self, job: Job, job_error: Exception) -> None:
         """
         Retry the job with the given job error.
 
@@ -467,7 +467,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
             results, _, _ = await self._wait_for_job(job)
             await self._succeed_job(job, results)
 
-    async def _run_job(self, job: Job):
+    async def _run_job(self, job: Job) -> None:
         """
         Run the job.
 
@@ -483,7 +483,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         else:
             await self._succeed_job(job, results)
 
-    def _run_job_sync(self, job: Job):
+    def _run_job_sync(self, job: Job) -> None:
         """
         Synchronous wrapper for _run_job that can be called by the Scheduler.
         Mirrors the Go pattern where scheduler calls the function directly.
@@ -499,7 +499,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         except Exception as e:
             logger.error(f"Error executing scheduled job {job.rid}: {e}")
 
-    def _cancel_job(self, job: Job):
+    def _cancel_job(self, job: Job) -> None:
         """
         Cancel a job.
 
@@ -524,7 +524,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
             except Exception as e:
                 logger.error(f"Error updating job status to cancelled: {e}")
 
-    async def _succeed_job(self, job: Job, results: List[Any]):
+    async def _succeed_job(self, job: Job, results: List[Any]) -> None:
         """
         Update the job status to succeeded and run the next job if available.
 
@@ -536,7 +536,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         logger.debug(f"_succeed_job: Setting job {job.rid} results to {results}")
         await self._end_job(job)
 
-    async def _fail_job(self, job: Job, job_error: Exception):
+    async def _fail_job(self, job: Job, job_error: Exception) -> None:
         """
         Update the job status to failed.
 
@@ -547,7 +547,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         job.error = str(job_error)
         await self._end_job(job)
 
-    async def _end_job(self, job: Job):
+    async def _end_job(self, job: Job) -> None:
         """
         End a job and potentially schedule it again if it's a recurring job.
 

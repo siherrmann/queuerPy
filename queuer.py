@@ -155,7 +155,7 @@ class Queuer(
             f"Queuer with worker created: {new_worker_obj.name} (RID: {self.worker.rid})"
         )
 
-    def start(self, master_settings: Optional[MasterSettings] = None):
+    def start(self, master_settings: Optional[MasterSettings] = None) -> None:
         """Start the queuer."""
         if self.running:
             raise RuntimeError("Queuer is already running")
@@ -214,7 +214,7 @@ class Queuer(
 
         logger.info("Queuer started")
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the queuer."""
         # Store whether we were running to decide if we need to close connections
         was_running = getattr(self, "_running", False)
@@ -388,7 +388,7 @@ class Queuer(
         logger.info(f"Queuer '{self.worker.name}' stopped")
 
     # Job notification listeners
-    async def _handle_job_notification(self, notification: str):
+    async def _handle_job_notification(self, notification: str) -> None:
         """
         Handle job database notifications.
 
@@ -423,7 +423,7 @@ class Queuer(
         except Exception as e:
             logger.error(f"Error handling job notification: {e}")
 
-    async def _handle_job_archive_notification(self, notification: str):
+    async def _handle_job_archive_notification(self, notification: str) -> None:
         """
         Handle job archive database notifications.
 
@@ -452,7 +452,7 @@ class Queuer(
             logger.error(f"Error handling job archive notification: {e}")
             traceback.print_exc()
 
-    def _start_listeners(self):
+    def _start_listeners(self) -> None:
         """Start database listeners."""
         # Start job listener
         if self.job_db_listener:
@@ -482,7 +482,7 @@ class Queuer(
             except Exception as e:
                 logger.error(f"Error starting job archive listener: {e}")
 
-    def _wait_for_listeners_ready(self, timeout_seconds: float = 3.0):
+    def _wait_for_listeners_ready(self, timeout_seconds: float = 3.0) -> None:
         """
         Wait for both database listeners to be ready by checking their connection status.
 
@@ -520,7 +520,7 @@ class Queuer(
         )
 
     # Tickers
-    def _heartbeat_func(self):
+    def _heartbeat_func(self) -> None:
         """Send periodic heartbeats - only updates database, not queuer state."""
         try:
             # Get current worker from database
@@ -535,7 +535,7 @@ class Queuer(
         except Exception as e:
             logger.error(f"Heartbeat error: {e}")
 
-    def _start_heartbeat_ticker(self):
+    def _start_heartbeat_ticker(self) -> None:
         """Start heartbeat ticker using threading."""
         self.heartbeat_ticker = Ticker(
             timedelta(seconds=30),
@@ -544,7 +544,7 @@ class Queuer(
         )
         self.heartbeat_ticker.go()
 
-    def _poll_jobs_func(self):
+    def _poll_jobs_func(self) -> None:
         """Poll for jobs as backup to notification system."""
         try:
             logger.debug("Running backup job polling")
@@ -552,7 +552,7 @@ class Queuer(
         except Exception as e:
             logger.warning(f"Backup job polling error: {e}")
 
-    def _start_poll_job_ticker(self):
+    def _start_poll_job_ticker(self) -> None:
         """
         Start job polling ticker as backup mechanism.
         This provides a safety net in case notification-based processing fails.
@@ -565,7 +565,9 @@ class Queuer(
         self.poll_job_ticker.go()
 
     # Database listeners
-    async def _start_job_listener(self, handle_job_notification: Callable[[str], Any]):
+    async def _start_job_listener(
+        self, handle_job_notification: Callable[[str], Any]
+    ) -> None:
         """
         Start job database listener.
 

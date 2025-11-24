@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 _DDL_LOCK = threading.RLock()
 
 
-def run_ddl(conn: Connection, sql_statement: str, max_retries: int = 3):
+def run_ddl(conn: Connection, sql_statement: str, max_retries: int = 3) -> None:
     """
     Executes DDL under a process lock, retrying on deadlocks or serialization errors.
 

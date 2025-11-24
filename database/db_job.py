@@ -67,14 +67,14 @@ class JobDBHandler:
             result = cur.fetchone()
             return result[0] if result else False
 
-    def create_table(self):
+    def create_table(self) -> None:
         """Create job table using SQL init function."""
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
 
         run_ddl(self.db.instance, "SELECT init_job();")
 
-    def drop_tables(self):
+    def drop_tables(self) -> None:
         """Drop job tables with DDL deadlock protection."""
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
@@ -128,7 +128,7 @@ class JobDBHandler:
         # In full implementation, this would handle explicit transaction context
         return self.insert_job(job)
 
-    def batch_insert_jobs(self, jobs: List[Job]):
+    def batch_insert_jobs(self, jobs: List[Job]) -> None:
         """
         Insert multiple jobs in a batch operation using executemany.
         Mirrors Go's BatchInsertJobs method with direct INSERT statements.
@@ -248,7 +248,7 @@ class JobDBHandler:
             except Exception as e:
                 raise QueuerError("update stale jobs", e)
 
-    def delete_job(self, rid: UUID):
+    def delete_job(self, rid: UUID) -> None:
         """
         Delete a job by RID using SQL function.
         Mirrors Go's DeleteJob method.
@@ -361,7 +361,7 @@ class JobDBHandler:
 
             return jobs
 
-    def add_retention_archive(self, days: int):
+    def add_retention_archive(self, days: int) -> None:
         """
         Add retention policy for archive cleanup.
         Mirrors Go's AddRetentionArchive method.
@@ -375,7 +375,7 @@ class JobDBHandler:
             cur.execute("SELECT add_retention_archive(%s);", (days,))
         self.db.instance.commit()
 
-    def remove_retention_archive(self):
+    def remove_retention_archive(self) -> None:
         """
         Remove retention policy for archive cleanup.
         Mirrors Go's RemoveRetentionArchive method.
