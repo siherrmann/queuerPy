@@ -91,11 +91,10 @@ class QueuerTaskMixin(QueuerGlobalMixin):
         logger.info(f"Task added: {new_task_obj.name}")
         return new_task_obj
 
-    @property
     def task(self) -> Callable[[F], F]:
         """
-        Decorator to register a task function with the queuer.
-        This is equivalent to calling add_task() or add_task_with_name().
+        Decorator to register a task function with the queuer using the function name.
+        This is equivalent to calling add_task().
 
         Usage:
             @queuer.task()
@@ -105,11 +104,11 @@ class QueuerTaskMixin(QueuerGlobalMixin):
         :return: The decorator function that preserves the original function's type
         """
 
-        def simple_decorator(func: F) -> F:
+        def decorator(func: F) -> F:
             self.add_task(func)
             return func
 
-        return simple_decorator
+        return decorator
 
     def task_with_name(self, name: str) -> Callable[[F], F]:
         """

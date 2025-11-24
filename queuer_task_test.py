@@ -123,10 +123,10 @@ class TestQueuerTask(DatabaseTestMixin, unittest.TestCase):
         queuer.stop()
 
     def test_task_decorator_with_name(self):
-        """Test the @queuer.task(name="custom_name") decorator with a custom name."""
+        """Test the @queuer.task_with_name(name="custom_name") decorator with a custom name."""
         queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
 
-        @queuer.task(name="my_custom_task")
+        @queuer.task_with_name(name="my_custom_task")
         def some_function(data: str) -> str:
             """Test task with custom name via decorator."""
             return f"Custom: {data}"
