@@ -265,14 +265,14 @@ class TestDatabaseUtilities(unittest.TestCase):
 
     def test_new_database_function_exists(self):
         """Test that new_database function exists and is importable."""
-        from queuerPy.helper.database import new_database
+        from .database import new_database
 
         self.assertTrue(callable(new_database))
 
     @patch("queuerPy.helper.database.Database")
     def test_new_database_creates_instance(self, mock_database_class: Mock):
         """Test new_database function creates Database instance."""
-        from queuerPy.helper.database import new_database, DatabaseConfiguration
+        from .database import new_database, DatabaseConfiguration
 
         mock_instance = Mock()
         mock_database_class.return_value = mock_instance
