@@ -416,7 +416,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
 
             try:
                 runner.go()
-                results = runner.get_results(timeout=300)
+                results = runner.get_results(timeout=None)
                 logger.debug(f"Runner task {job.task_name} completed: {results}")
                 return [results], False, None
 
