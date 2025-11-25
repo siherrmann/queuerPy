@@ -97,10 +97,6 @@ class QueuerListener:
                                 gen.__anext__(), timeout=0.1
                             )
                             if notify.channel == self.channel:
-                                self.logger.debug(
-                                    f"Received notification: {notify.payload}"
-                                )
-                                # Process notification
                                 try:
                                     await notify_function(notify.payload or "")
                                     notifications_processed = True

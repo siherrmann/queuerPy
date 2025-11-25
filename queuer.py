@@ -169,10 +169,14 @@ class Queuer(
 
         # Set up database listeners
         try:
-            self.job_db_listener = new_queuer_db_listener(self.db_config, "job")
+            self.job_db_listener = new_queuer_db_listener(
+                self.db_config,
+                "job",
+            )
             logger.info("Added listener for channel: job")
             self.job_archive_db_listener = new_queuer_db_listener(
-                self.db_config, "job_archive"
+                self.db_config,
+                "job_archive",
             )
             logger.info("Added listener for channel: job_archive")
         except Exception as e:
@@ -413,7 +417,7 @@ class Queuer(
         try:
             job = Job.from_dict(json.loads(notification))
 
-            logger.debug(f"[{self.name}] Received job notification: {job}")
+            logger.debug(f"Job added: {job.rid}")
 
             if job.status in [JobStatus.QUEUED, JobStatus.SCHEDULED]:
                 go_func(self._run_job_initial, use_mp=False)
@@ -446,7 +450,6 @@ class Queuer(
                     and self.job_delete_broadcaster
                 ):
                     await self.job_delete_broadcaster.broadcast(job)
-                    logger.info(f"Broadcasted job deletion completion for {job.rid}")
 
         except Exception as e:
             logger.error(f"Error handling job archive notification: {e}")

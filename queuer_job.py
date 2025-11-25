@@ -352,8 +352,9 @@ class QueuerJobMixin(QueuerGlobalMixin):
 
         worker: Worker = getattr(self, "worker")
 
-        logger.debug(f"Worker available_tasks: {worker.available_tasks}")
-        logger.debug(f"Worker max_concurrency: {worker.max_concurrency}")
+        logger.debug(
+            f"Worker available_tasks: {worker.available_tasks}, max_concurrency: {worker.max_concurrency}"
+        )
 
         jobs = self.db_job.update_jobs_initial(worker)
         if not jobs:
@@ -363,7 +364,6 @@ class QueuerJobMixin(QueuerGlobalMixin):
         logger.info(f"Found {len(jobs)} jobs to run")
 
         for job in jobs:
-            logger.info(f"Processing job: {job.rid}")
             if (
                 job.options
                 and job.options.schedule
@@ -382,7 +382,6 @@ class QueuerJobMixin(QueuerGlobalMixin):
 
                 logger.info(f"Scheduled job {job.rid} for {job.options.schedule.start}")
             else:
-                logger.info(f"Running job immediately: {job.rid}")
                 runner = SmallRunner(self._run_job, job)
                 runner.go()
 
