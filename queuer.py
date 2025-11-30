@@ -526,15 +526,22 @@ class Queuer(
     def _heartbeat_func(self) -> None:
         """Send periodic heartbeats - only updates database, not queuer state."""
         try:
-            # Get current worker from database
-            current_worker = self.db_worker.select_worker(self.worker.rid)
+            # Get current worker with mutex
+            with self.worker_mutex:
+                current_worker = self.worker
+
+            updated_worker: Optional[Worker] = None
             if current_worker:
                 # Update timestamp and save to database
                 current_worker.updated_at = datetime.now()
-                self.db_worker.update_worker(current_worker)
+                updated_worker = self.db_worker.update_worker(current_worker)
                 logger.debug(
                     f"Updated worker heartbeat timestamp: {current_worker.updated_at}"
                 )
+
+            if updated_worker:
+                with self.worker_mutex:
+                    self.worker = updated_worker
         except Exception as e:
             logger.error(f"Heartbeat error: {e}")
 
