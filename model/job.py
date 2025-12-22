@@ -40,7 +40,8 @@ class Job:
 
     # Job definition
     task_name: str = ""
-    parameters: List[Any] = field(default_factory=lambda: [])
+    parameters: List[Any] = field(default_factory=list)
+    parameters_keyed: Dict[str, Any] = field(default_factory=dict)
     options: Optional[Options] = None
 
     # Job state
@@ -65,6 +66,7 @@ class Job:
             "worker_rid": str(self.worker_rid),
             "task_name": self.task_name,
             "parameters": self.parameters,
+            "parameters_keyed": self.parameters_keyed,
             "options": self.options.to_dict() if self.options else None,
             "status": self.status,
             "scheduled_at": (
@@ -110,6 +112,7 @@ class Job:
             job.worker_rid = UUID(data["worker_rid"])
         job.task_name = data.get("task_name", "")
         job.parameters = data.get("parameters", [])
+        job.parameters_keyed = data.get("parameters_keyed", {})
         if data.get("options"):
             job.options = Options.from_dict(data["options"])
         job.status = data.get("status", JobStatus.QUEUED)
@@ -173,6 +176,16 @@ class Job:
                 else parameters_value
             )
 
+        parameters_keyed_value = row.get(
+            "output_parameters_keyed", row.get("parameters_keyed")
+        )
+        if parameters_keyed_value:
+            job.parameters_keyed = (
+                json.loads(parameters_keyed_value)
+                if isinstance(parameters_keyed_value, str)
+                else parameters_keyed_value
+            )
+
         results_value = row.get("output_results", row.get("results"))
         if results_value is not None:
             # JSONB columns return Python objects directly, no JSON parsing needed
@@ -194,6 +207,7 @@ def new_job(
     task: Union[Callable[..., Any], str],
     options: Optional[Options] = None,
     *parameters: Any,
+    **parameters_keyed: Any,
 ) -> Job:
     """
     Create a new job from a task function or task name.
@@ -237,6 +251,7 @@ def new_job(
     job: Job = Job()
     job.task_name = task_name
     job.parameters = list(parameters)
+    job.parameters_keyed = parameters_keyed
     job.options = options
     job.status = status
     job.scheduled_at = scheduled_at

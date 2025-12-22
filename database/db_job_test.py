@@ -281,16 +281,23 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     # DeleteJob
     def test_delete_job(self):
-        """Test deleting a job."""
+        """Test deleting a job from archive."""
         job_db_handler = JobDBHandler(self.db, with_table_drop=True)
 
         job = new_job("TestTask", None)
         inserted_job = job_db_handler.insert_job(job)
 
-        job_db_handler.delete_job(inserted_job.rid)
+        # Mark job as finished to move it to archive
+        inserted_job.status = "SUCCEEDED"
+        inserted_job.results = []
+        inserted_job.error = ""
+        archived_job = job_db_handler.update_job_final(inserted_job)
 
-        # Verify that the job no longer exists
-        deleted_job = job_db_handler.select_job(inserted_job.rid)
+        # Now delete from archive
+        job_db_handler.delete_job(archived_job.rid)
+
+        # Verify that the job no longer exists in archive
+        deleted_job = job_db_handler.select_job_from_archive(archived_job.rid)
         self.assertIsNone(deleted_job, "Expected deleted job to be None")
 
     # SelectJob

@@ -134,7 +134,7 @@ class TestQueuerLogger(unittest.TestCase):
 
     def test_critical_logging(self):
         """Test critical level logging."""
-        logger = QueuerLogger(stream=self.stream)
+        logger = QueuerLogger(stream=self.stream, use_colors=False)
         logger.critical("Critical message")
 
         output = self.stream.getvalue()

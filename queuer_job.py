@@ -34,17 +34,23 @@ class QueuerJobMixin(QueuerGlobalMixin):
     def __init__(self):
         super().__init__()
 
-    def add_job(self, task: Union[Callable[..., Any], str], *parameters: Any) -> Job:
+    def add_job(
+        self,
+        task: Union[Callable[..., Any], str],
+        *parameters: Any,
+        **parameters_keyed: Any,
+    ) -> Job:
         """
         Add a job to the queue with the given task and parameters.
 
         :param task: Either a function or a string with the task name
-        :param parameters: Parameters to pass to the task
+        :param parameters: Positional parameters to pass to the task
+        :param parameters_keyed: Keyword parameters to pass to the task
         :returns: The created job
         :raises Exception: If something goes wrong
         """
         options: Optional[Options] = self._merge_options(None)
-        job: Job = self._add_job(task, options, *parameters)
+        job: Job = self._add_job(task, options, *parameters, **parameters_keyed)
 
         logger.info(f"Job added: {job.rid}")
 
@@ -55,6 +61,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         options: Optional[Options],
         task: Union[Callable[..., Any], str],
         *parameters: Any,
+        **parameters_keyed: Any,
     ) -> Job:
         """Add a new job with specific options."""
         # Merge default options with provided options
@@ -62,7 +69,9 @@ class QueuerJobMixin(QueuerGlobalMixin):
 
         try:
             # Create new job
-            new_job: Job = create_job(task, options_merged, *parameters)
+            new_job: Job = create_job(
+                task, options_merged, *parameters, **parameters_keyed
+            )
             job: Job = self.db_job.insert_job(new_job)
 
             logger.info(f"Job with options added: {job.rid}")
@@ -82,7 +91,9 @@ class QueuerJobMixin(QueuerGlobalMixin):
         for batch_job in batch_jobs:
             options: Optional[Options] = self._merge_options(batch_job.options)
             task_name: str = get_task_name_from_interface(batch_job.task)
-            job: Job = create_job(task_name, options, *batch_job.parameters)
+            job: Job = create_job(
+                task_name, options, *batch_job.parameters, **batch_job.parameters_keyed
+            )
             jobs.append(job)
 
         self.db_job.batch_insert_jobs(jobs)
@@ -232,7 +243,9 @@ class QueuerJobMixin(QueuerGlobalMixin):
             raise Exception(f"Job not found in archive: {job_rid}")
 
         # Readd the job to the queue
-        new_job = self.add_job_with_options(job.options, job.task_name, *job.parameters)
+        new_job = self.add_job_with_options(
+            job.options, job.task_name, *job.parameters, **job.parameters_keyed
+        )
         logger.info(f"Job readded: {new_job.rid}")
         return new_job
 
@@ -317,18 +330,20 @@ class QueuerJobMixin(QueuerGlobalMixin):
         task: Union[Callable[..., Any], str],
         options: Optional["Options"],
         *parameters: Any,
+        **parameters_keyed: Any,
     ) -> Job:
         """
         Add a job to the queue with all necessary parameters.
 
         :param task: Either a function or a string with the task name
         :param options: Job-specific options (can be None)
-        :param parameters: Parameters to pass to the task
+        :param parameters: Positional parameters to pass to the task
+        :param parameters_keyed: Keyword parameters to pass to the task
         :returns: The created job
         :raises Exception: If something goes wrong
         """
         try:
-            new_job = create_job(task, options, *parameters)
+            new_job = create_job(task, options, *parameters, **parameters_keyed)
             job = self.db_job.insert_job(new_job)
 
             return job
@@ -405,7 +420,8 @@ class QueuerJobMixin(QueuerGlobalMixin):
 
         try:
             parameters = getattr(job, "parameters", [])
-            runner = Runner(task, *parameters)
+            parameters_keyed = getattr(job, "parameters_keyed", {})
+            runner = Runner(task, *parameters, **parameters_keyed)
 
             logger.info(f"Created runner for job {job.rid}")
 

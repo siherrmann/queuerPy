@@ -95,11 +95,12 @@ class JobDBHandler:
 
         with self.db.instance.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT * FROM insert_job(%s, %s, %s, %s, %s, %s);",
+                "SELECT * FROM insert_job(%s, %s, %s, %s, %s, %s, %s);",
                 (
                     json.dumps(job.options.to_dict()) if job.options else None,
                     job.task_name,
                     json.dumps(job.parameters),
+                    json.dumps(job.parameters_keyed),
                     job.status,
                     job.scheduled_at,
                     job.schedule_count,
@@ -144,21 +145,28 @@ class JobDBHandler:
             raise ValueError("Database connection is not established")
 
         try:
-            batch_data: List[Tuple[str, str, str, Optional[datetime]]] = []
+            batch_data: List[Tuple[str, str, str, str, Optional[datetime]]] = []
             for job in jobs:
                 options_json = (
                     json.dumps(job.options.to_dict()) if job.options else "{}"
                 )
                 parameters_json = json.dumps(job.parameters)
+                parameters_keyed_json = json.dumps(job.parameters_keyed)
                 batch_data.append(
-                    (options_json, job.task_name, parameters_json, job.scheduled_at)
+                    (
+                        options_json,
+                        job.task_name,
+                        parameters_json,
+                        parameters_keyed_json,
+                        job.scheduled_at,
+                    )
                 )
 
             with self.db.instance.cursor(row_factory=dict_row) as cur:
                 cur.executemany(
                     """
-                    INSERT INTO job (options, task_name, parameters, scheduled_at) 
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO job (options, task_name, parameters, parameters_keyed, scheduled_at) 
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
                     batch_data,
                 )
