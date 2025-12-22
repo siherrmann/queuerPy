@@ -30,6 +30,16 @@ def task_mock(duration: int, param2: str) -> int:
     return duration + param2_int
 
 
+def task_with_kwargs(a: int, b: str = "default", c: int = 0) -> dict:
+    """Task function that accepts both positional and keyword arguments."""
+    return {"a": a, "b": b, "c": c}
+
+
+def task_kwargs_only(**kwargs) -> dict:
+    """Task function that accepts only keyword arguments."""
+    return kwargs
+
+
 class MockFailer:
     """Mock class that fails a certain number of times."""
 
@@ -147,6 +157,99 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
         self.assertIsNotNone(retrieved_job)
         if retrieved_job:
             self.assertEqual(retrieved_job.rid, job.rid)
+
+        queuer.stop()
+
+    def test_add_job_only_positional_args_no_options(self):
+        """Test add_job with only positional arguments and no options."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_with_kwargs)
+
+        job = queuer.add_job(task_with_kwargs, 42)
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.task_name, "task_with_kwargs")
+        self.assertEqual(job.parameters, [42])
+        self.assertEqual(job.parameters_keyed, {})
+        self.assertIsNone(job.options)
+
+        queuer.stop()
+
+    def test_add_job_only_kwargs_no_options(self):
+        """Test add_job with only keyword arguments and no options."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_kwargs_only)
+
+        job = queuer.add_job(task_kwargs_only, name="test", value=42, flag=True)
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.task_name, "task_kwargs_only")
+        self.assertEqual(job.parameters, [])
+        self.assertEqual(
+            job.parameters_keyed, {"name": "test", "value": 42, "flag": True}
+        )
+        self.assertIsNone(job.options)
+
+        queuer.stop()
+
+    def test_add_job_both_args_and_kwargs_no_options(self):
+        """Test add_job with both positional and keyword arguments, no options."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_with_kwargs)
+
+        job = queuer.add_job(task_with_kwargs, 42, b="custom", c=100)
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.task_name, "task_with_kwargs")
+        self.assertEqual(job.parameters, [42])
+        self.assertEqual(job.parameters_keyed, {"b": "custom", "c": 100})
+        self.assertIsNone(job.options)
+
+        queuer.stop()
+
+    def test_add_job_with_options_only_positional(self):
+        """Test add_job_with_options with only positional arguments."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_with_kwargs)
+
+        options = Options(on_error=OnError(retry_delay=2.0))
+        job = queuer.add_job_with_options(options, task_with_kwargs, 42)
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.parameters, [42])
+        self.assertEqual(job.parameters_keyed, {})
+        self.assertIsNotNone(job.options)
+
+        queuer.stop()
+
+    def test_add_job_with_options_only_kwargs(self):
+        """Test add_job_with_options with only keyword arguments."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_kwargs_only)
+
+        options = Options(on_error=OnError(retry_delay=2.0))
+        job = queuer.add_job_with_options(
+            options, task_kwargs_only, name="test", value=42
+        )
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.parameters, [])
+        self.assertEqual(job.parameters_keyed, {"name": "test", "value": 42})
+
+        queuer.stop()
+
+    def test_add_job_with_options_both_args_and_kwargs(self):
+        """Test add_job_with_options with both positional and keyword arguments."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_with_kwargs)
+
+        options = Options(on_error=OnError(max_retries=10))
+        job = queuer.add_job_with_options(options, task_with_kwargs, 42, b="test", c=99)
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.parameters, [42])
+        self.assertEqual(job.parameters_keyed, {"b": "test", "c": 99})
+        self.assertIsNotNone(job.options)
 
         queuer.stop()
 
@@ -390,6 +493,59 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
 
         queuer.stop()
 
+    def test_execute_job_with_only_kwargs(self):
+        """Test executing a job with only keyword arguments."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_kwargs_only)
+        queuer.start()
+
+        job = queuer.add_job(task_kwargs_only, name="test", value=42, flag=True)
+        self.assertIsNotNone(job)
+
+        finished_job = queuer.wait_for_job_finished(job.rid, timeout_seconds=10.0)
+        self.assertIsNotNone(finished_job)
+        if finished_job:
+            self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
+            self.assertEqual(
+                finished_job.results, [{"name": "test", "value": 42, "flag": True}]
+            )
+
+        queuer.stop()
+
+    def test_execute_job_with_both_args_and_kwargs(self):
+        """Test executing a job with both positional and keyword arguments."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_with_kwargs)
+        queuer.start()
+
+        job = queuer.add_job(task_with_kwargs, 10, b="custom", c=5)
+        self.assertIsNotNone(job)
+
+        finished_job = queuer.wait_for_job_finished(job.rid, timeout_seconds=10.0)
+        self.assertIsNotNone(finished_job)
+        if finished_job:
+            self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
+            self.assertEqual(finished_job.results, [{"a": 10, "b": "custom", "c": 5}])
+
+        queuer.stop()
+
+    def test_execute_job_with_only_positional_args(self):
+        """Test executing a job with only positional arguments."""
+        queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
+        queuer.add_task(task_with_kwargs)
+        queuer.start()
+
+        job = queuer.add_job(task_with_kwargs, 20)
+        self.assertIsNotNone(job)
+
+        finished_job = queuer.wait_for_job_finished(job.rid, timeout_seconds=10.0)
+        self.assertIsNotNone(finished_job)
+        if finished_job:
+            self.assertEqual(finished_job.status, JobStatus.SUCCEEDED)
+            self.assertEqual(finished_job.results, [{"a": 20, "b": "default", "c": 0}])
+
+        queuer.stop()
+
     def test_job_execution_timeout(self):
         """Test job execution timeout handling using wait_for_job_finished."""
         queuer: Queuer = new_queuer_with_db("test_queuer", 10, "", self.db_config)
@@ -436,7 +592,3 @@ class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
             queuer.get_job(job.rid)
 
         queuer.stop()
-
-
-if __name__ == "__main__":
-    unittest.main()

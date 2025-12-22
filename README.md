@@ -1,8 +1,9 @@
 # queuerPy
 
+[![PyPi](https://pythonico.leapcell.app/pypi/queuerPy.svg?style=shields&data=n,v,d)](https://pypi.org/project/queuerPy/)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/siherrmann/queuer/blob/master/LICENSE)
 ![Coverage](https://raw.githubusercontent.com/siherrmann/queuerPy/refs/heads/main/coverage-badge.svg)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/siherrmann/queuer/blob/master/LICENSE)
 
 Python port of the queuer package - a queueing system based on PostgreSQL.
 
@@ -54,9 +55,15 @@ def example_task():
 That's easy, right? Adding a job is just as easy:
 
 ```python
-# Add a job to the queue
+# Add a job to the queue with positional arguments
 job = q.add_job(example_task, 5, "12")
 print(f"Job added: {job.rid}")
+
+# Add a job with keyword arguments (kwargs)
+job = q.add_job(example_task, paramKeyed1="test", debug=True)
+
+# Add a job with both positional and keyword arguments
+job = q.add_job(example_task, 5, "12", paramKeyed1="test", debug=True)
 ```
 
 In the initialisation of the queuer the existence of the necessary database tables is checked and if they don't exist they get created. The database is configured with these environment variables:
@@ -153,6 +160,72 @@ def add_task_with_name(self, task: Callable, name: str) -> Task
 - `name`: A `str` specifying the custom name for this task. This name must be unique within the queuer's tasks.
 
 This method handles the registration of a task, making the worker able to pick up and execute a job of this task type. It also updates the worker's available tasks in the database. The task should be added before starting the queuer. If there's an issue during task creation or database update, an exception will be raised.
+
+---
+
+## add_job
+
+The `add_job` method adds a new job to the queue for execution. Jobs are units of work that will be processed by the queuer.
+
+```python
+def add_job(
+    self, 
+    task: Union[Callable, str], 
+    *parameters: Any,
+    **parameters_keyed: Any
+) -> Job
+
+def add_job_with_options(
+    self,
+    options: Optional[Options],
+    task: Union[Callable, str],
+    *parameters: Any,
+    **parameters_keyed: Any
+) -> Job
+```
+
+- `task`: A `Callable` or `str` representing the task to execute. If a callable, it must be registered with `add_task` first.
+- `options`: Optional `Options` for custom error handling or scheduling behavior. Only available in `add_job_with_options()`.
+- `*parameters`: Positional arguments to pass to the task function.
+- `**parameters_keyed`: Keyword arguments to pass to the task function (Python-specific feature).
+
+**Examples:**
+
+```python
+# Job with both positional and keyword arguments
+job = queuer.add_job(my_task, "arg1", paramKeyed1="test", paramKeyed2=1)
+
+# Job with custom options (requires add_job_with_options)
+options = Options(on_error=OnError(max_retries=5))
+job = queuer.add_job_with_options(options, my_task, "arg1", debug=True)
+```
+
+**Note:** Keyword arguments (`**parameters_keyed`) are stored separately in the database and enable Python functions to be called with named parameters. This is useful for optional parameters, default values, and improved code clarity. Go jobs continue to use only positional parameters.
+
+---
+
+## add_jobs
+
+The `add_jobs` method allows efficient batch insertion of multiple jobs at once.
+
+```python
+def add_jobs(self, batch_jobs: List[BatchJob]) -> List[UUID]
+```
+
+- `batch_jobs`: A list of `BatchJob` instances to insert.
+
+**Example:**
+
+```python
+from model.batch_job import BatchJob
+
+batch = [
+    BatchJob(task=my_task, parameters=[1, "a"]),
+    BatchJob(task=my_task, parameters=[2], parameters_keyed={"name": "b"}),
+    BatchJob(task=my_task, parameters_keyed={"id": 3, "name": "c"})
+]
+job_rids = queuer.add_jobs(batch)
+```
 
 ---
 
@@ -253,19 +326,20 @@ class Schedule:
 ### Job Management
 
 ```python
-# Add a single job
-job = queuer.add_job(my_task, param1, param2)
+# Add a job with both positional and keyword arguments
+job = queuer.add_job(my_task, param1, param2, paramKeyed1="test", paramKeyed2=1)
 
 # Add a job with custom options
 from model.options import Options, OnError
 options = Options(on_error=OnError(max_retries=5, timeout=60.0))
-job = queuer.add_job_with_options(options, my_task, param1)
+job = queuer.add_job_with_options(options, my_task, param1, paramKeyed1="test")
 
 # Add multiple jobs as a batch
 from model.batch_job import BatchJob
 batch = [
     BatchJob(task=my_task, parameters=[1, "a"]),
-    BatchJob(task=my_task, parameters=[2, "b"])
+    BatchJob(task=my_task, parameters=[2], parameters_keyed={"name": "b"}),
+    BatchJob(task=my_task, parameters_keyed={"id": 3, "name": "c"})
 ]
 queuer.add_jobs(batch)
 
@@ -292,6 +366,7 @@ worker_jobs = queuer.get_jobs_by_worker_rid(worker.rid)
 
 # ⭐ Features
 
+- **Keyword Arguments Support**: Python functions can use both positional arguments (`*args`) and keyword arguments (`**kwargs`), while maintaining compatibility with Go jobs that use only positional parameters.
 - **Async/Await Support**: Full asyncio integration with threading fallbacks.
 - **PostgreSQL NOTIFY/LISTEN**: Real-time job notifications without polling overhead.
 - **Batch Job Processing**: Insert job batches efficiently using PostgreSQL's `COPY FROM` feature.
