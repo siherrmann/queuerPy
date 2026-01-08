@@ -17,6 +17,7 @@ class WorkerStatus:
     READY = "READY"
     RUNNING = "RUNNING"
     FAILED = "FAILED"
+    STOPPING = "STOPPING"
     STOPPED = "STOPPED"
 
 

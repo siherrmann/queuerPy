@@ -28,6 +28,7 @@ from .queuer_task import QueuerTaskMixin
 from .queuer_next_interval import QueuerNextIntervalMixin
 from .queuer_listener import QueuerListenerMixin
 from .queuer_master import QueuerMasterMixin
+from .queuer_worker import QueuerWorkerMixin
 
 logger = get_logger(__name__)
 
@@ -68,6 +69,7 @@ class Queuer(
     QueuerNextIntervalMixin,
     QueuerListenerMixin,
     QueuerMasterMixin,
+    QueuerWorkerMixin,
 ):
     """
     Main queuing system class.
@@ -113,6 +115,7 @@ class Queuer(
 
         # Configuration
         self.job_poll_interval: timedelta = timedelta(minutes=5)
+        self.worker_poll_interval: timedelta = timedelta(seconds=30)
         self.retention_archive: timedelta = timedelta(days=30)
 
         # Active runners (jobs currently executing)
@@ -219,177 +222,96 @@ class Queuer(
         logger.info("Queuer started")
 
     def stop(self) -> None:
-        """Stop the queuer."""
-        # Store whether we were running to decide if we need to close connections
-        was_running = getattr(self, "_running", False)
+        """
+        Stop stops the queuer by closing the job listeners, cancelling all queued and running jobs,
+        and cancelling the context to stop the queuer.
+        """
+        # Check if already stopped (database is None means we've already cleaned up)
+        if self.database is None:
+            return  # Already stopped
 
-        # Stop tickers first to prevent new work from being queued
-        if self.heartbeat_ticker:
+        # Mark as not running immediately to prevent re-entrant calls
+        was_running = self.running
+        self.running = False
+
+        # Stop tickers first to prevent them from calling stop() recursively
+        if hasattr(self, "heartbeat_ticker") and self.heartbeat_ticker:
             try:
                 self.heartbeat_ticker.stop()
             except Exception as e:
                 logger.warning(f"Error stopping heartbeat ticker: {e}")
 
-        if self.poll_job_ticker:
+        if hasattr(self, "poll_job_ticker") and self.poll_job_ticker:
             try:
                 self.poll_job_ticker.stop()
             except Exception as e:
                 logger.warning(f"Error stopping poll job ticker: {e}")
 
-        # Close database listeners
+        # Close db listeners
         if self.job_db_listener:
             try:
-                # Use go_func but wait for completion
                 task = go_func(self.job_db_listener.stop, use_mp=False)
-                task.get_results(timeout=3.0)  # Wait up to 3 seconds total
+                task.get_results(timeout=3.0)
             except Exception as e:
                 # Only log if it's not already closed
-                if "closed" not in str(e).lower():
-                    logger.warning(f"Error stopping job listener: {e}")
-
-        # Wait for database listener runners to complete
-        if self.job_db_listener_runner:
-            try:
-                self.job_db_listener_runner.get_results(timeout=2.0)
-                self.job_db_listener_runner = None
-            except Exception as e:
-                logger.warning(f"Error waiting for job listener runner: {e}")
+                if "Listener has been closed" not in str(e):
+                    logger.error(f"Error closing job insert listener: {e}")
 
         if self.job_archive_db_listener:
             try:
                 task = go_func(self.job_archive_db_listener.stop, use_mp=False)
-                task.get_results(timeout=3.0)  # Wait up to 3 seconds total
+                task.get_results(timeout=3.0)
             except Exception as e:
-                if "closed" not in str(e).lower():
-                    logger.warning(f"Error stopping job archive listener: {e}")
+                if "Listener has been closed" not in str(e):
+                    logger.error(f"Error closing job archive listener: {e}")
 
-        # Wait for database archive listener runner to complete
-        if self.job_archive_db_listener_runner:
-            try:
-                self.job_archive_db_listener_runner.get_results(timeout=2.0)
-                self.job_archive_db_listener_runner = None
-            except Exception as e:
-                logger.warning(f"Error waiting for job archive listener runner: {e}")
-
-        # Update worker status to stopped (only if we were running)
+        # Update worker status to stopped
+        err = None
         worker_rid = None
-        if was_running:
-            try:
-                with self.worker_mutex:
+        if self.database and self.database.instance:
+            with self.worker_mutex:
+                if self.worker:
                     self.worker.status = WorkerStatus.STOPPED
                     worker_updated = self.db_worker.update_worker(self.worker)
                     if worker_updated:
+                        self.worker = worker_updated
                         worker_rid = self.worker.rid
-            except Exception as e:
-                logger.error(f"Error updating worker status to stopped: {e}")
-        else:
-            # If we were never running, just get the worker_rid for job cancellation
-            worker_rid = self.worker.rid
+                    else:
+                        err = Exception("Failed to update worker")
 
-        # Cancel all queued and running jobs
+        if err:
+            logger.error(f"Error updating worker status to stopped: {err}")
+            return
+
+        # Cancel all queued and running jobs (only if we have a valid worker RID)
         if worker_rid:
             try:
                 self.cancel_all_jobs_by_worker(worker_rid, 100)
             except Exception as e:
                 logger.error(f"Error cancelling all jobs by worker: {e}")
+                return
 
-        # Cancel the context equivalent - set cancellation event
-        if self._cancel_event:
-            try:
-                self._cancel_event.set()
-            except Exception as e:
-                logger.warning(f"Error setting cancel event: {e}")
-
-        # Signal that we're stopping
-        self.running = False
-        self._stopped.set()
-
-        # Cancel all active runners - similar to Go's job cancellation
-        active_runner_count = len(self.active_runners)
-        if active_runner_count > 0:
-            logger.info(f"Cancelling {active_runner_count} active runners")
-
+        # Cancel all active runners
         for runner_id, runner in list(self.active_runners.items()):
-            try:
-                runner.cancel()
-                if runner_id in self.active_runners:
-                    del self.active_runners[runner_id]
-                    logger.debug(f"Removed runner {runner_id} from active_runners")
+            runner.cancel()
+            del self.active_runners[runner_id]
 
-            except Exception as e:
-                logger.warning(f"Error cancelling runner {runner_id}: {e}")
+        # Cancel the context to stop the queuer
+        if self._cancel_event:
+            self._cancel_event.set()
 
-        # Final check
-        remaining_runners = len(self.active_runners)
-        if remaining_runners > 0:
-            logger.warning(f"{remaining_runners} runners could not be cleaned up")
-        else:
-            logger.debug("All active runners cleaned up successfully")
+        # Wait a moment for background goroutines to finish gracefully
+        time.sleep(0.1)
 
-        # Cleanup broadcasters and listeners
-        try:
-            broadcaster_count = 0
-            if self.job_insert_broadcaster:
-                listener_count = len(self.job_insert_broadcaster.listeners)
-                if listener_count > 0:
-                    logger.debug(
-                        f"Clearing {listener_count} listeners from job_insert_broadcaster"
-                    )
-                    self.job_insert_broadcaster.listeners.clear()
-                broadcaster_count += 1
-
-            if self.job_update_broadcaster:
-                listener_count = len(self.job_update_broadcaster.listeners)
-                if listener_count > 0:
-                    logger.debug(
-                        f"Clearing {listener_count} listeners from job_update_broadcaster"
-                    )
-                    self.job_update_broadcaster.listeners.clear()
-                broadcaster_count += 1
-
-            if self.job_delete_broadcaster:
-                listener_count = len(self.job_delete_broadcaster.listeners)
-                if listener_count > 0:
-                    logger.debug(
-                        f"Clearing {listener_count} listeners from job_delete_broadcaster"
-                    )
-                    self.job_delete_broadcaster.listeners.clear()
-                broadcaster_count += 1
-
-            if broadcaster_count > 0:
-                logger.debug(f"Cleaned up {broadcaster_count} broadcasters")
-
-        except Exception as e:
-            logger.warning(f"Error during broadcaster cleanup: {e}")
-
-        # Cleanup AsyncIO resources
-        try:
-            try:
-                loop = asyncio.get_running_loop()
-                pending_tasks = [
-                    task for task in asyncio.all_tasks(loop) if not task.done()
-                ]
-                if pending_tasks:
-                    logger.debug(f"Cancelling {len(pending_tasks)} pending async tasks")
-                    for task in pending_tasks:
-                        task.cancel()
-            except RuntimeError:
-                pass
-
-            # Clear the cancel event
-            self._cancel_event = None
-
-        except Exception as e:
-            logger.warning(f"Error during AsyncIO cleanup: {e}")
-
+        # Close database connection
         if self.database:
+            logger.info("Closing database connection")
             try:
-                logger.info(f"Closing database '{self.name}'")
                 self.database.close()
             except Exception as e:
-                logger.error(f"Error closing main database connection: {e}")
+                logger.error(f"Error closing database connection: {e}")
 
-        logger.info(f"Queuer '{self.worker.name}' stopped")
+        logger.info("Queuer stopped")
 
     # Job notification listeners
     async def _handle_job_notification(self, notification: str) -> None:
@@ -524,31 +446,77 @@ class Queuer(
 
     # Tickers
     def _heartbeat_func(self) -> None:
-        """Send periodic heartbeats - only updates database, not queuer state."""
+        """Send periodic heartbeats and handle worker status changes."""
         try:
-            # Get current worker with mutex
+            logger.debug("Sending worker heartbeat...")
+
+            # Get current worker with read lock
             with self.worker_mutex:
-                current_worker = self.worker
+                worker = self.worker
 
-            updated_worker: Optional[Worker] = None
-            if current_worker:
-                # Update timestamp and save to database
-                current_worker.updated_at = datetime.now()
-                updated_worker = self.db_worker.update_worker(current_worker)
-                logger.debug(
-                    f"Updated worker heartbeat timestamp: {current_worker.updated_at}"
+            if worker is None:
+                return
+
+            # Select worker from database for heartbeat
+            worker_from_db = self.db_worker.select_worker(worker.rid)
+            if not worker_from_db:
+                logger.error("Error selecting worker for heartbeat")
+                return
+
+            # Handle worker status
+            if worker_from_db.status == WorkerStatus.STOPPED:
+                logger.info(
+                    f"Stopping worker... (worker_status: {worker_from_db.status})"
                 )
+                try:
+                    self.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping queuer: {e}")
+                return
 
-            if updated_worker:
-                with self.worker_mutex:
-                    self.worker = updated_worker
+            elif worker_from_db.status == WorkerStatus.STOPPING:
+                if worker_from_db.max_concurrency != 0:
+                    logger.info(
+                        f"Gracefully stopping worker... (worker_status: {worker_from_db.status})"
+                    )
+                    worker_from_db.max_concurrency = 0
+                    worker_from_db = self.db_worker.update_worker(worker_from_db)
+                    if not worker_from_db:
+                        logger.error("Error updating worker concurrency")
+                        return
+                elif len(self.active_runners) == 0:
+                    logger.info(
+                        f"All running jobs finished, stopping worker... (worker_status: {worker_from_db.status})"
+                    )
+                    worker_from_db.status = WorkerStatus.STOPPED
+                    worker_from_db = self.db_worker.update_worker(worker_from_db)
+                    if not worker_from_db:
+                        logger.error("Error updating worker status to stopped")
+                        return
+                    try:
+                        self.stop()
+                    except Exception as e:
+                        logger.error(f"Error stopping queuer: {e}")
+                    return
+
+            else:
+                # Default case: update worker heartbeat
+                worker_from_db = self.db_worker.update_worker(worker)
+                if not worker_from_db:
+                    logger.error("Error updating worker heartbeat")
+                    return
+
+            # Update local worker with write lock
+            with self.worker_mutex:
+                self.worker = worker_from_db
+
         except Exception as e:
             logger.error(f"Heartbeat error: {e}")
 
     def _start_heartbeat_ticker(self) -> None:
         """Start heartbeat ticker using threading."""
         self.heartbeat_ticker = Ticker(
-            timedelta(seconds=30),
+            self.worker_poll_interval,
             self._heartbeat_func,
             use_mp=False,
         )
