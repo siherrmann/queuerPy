@@ -15,9 +15,7 @@ The job table contains only queued, scheduled and running tasks. The ended jobs 
 
 ---
 
-# 🛠️ Installation
-
-## PyPI Installation (Recommended)
+## 🛠️ Installation
 
 ```bash
 pip install queuerPy
@@ -91,10 +89,10 @@ You can find a full example in the example folder.
 def new_queuer(name: str, max_concurrency: int, *options: OnError) -> Queuer
 
 def new_queuer_with_db(
-    name: str, 
-    max_concurrency: int, 
-    encryption_key: str, 
-    db_config: DatabaseConfiguration, 
+    name: str,
+    max_concurrency: int,
+    encryption_key: str,
+    db_config: DatabaseConfiguration,
     *options: OnError
 ) -> Queuer
 ```
@@ -106,6 +104,7 @@ def new_queuer_with_db(
 - `options`: Optional `OnError` configurations to apply to the worker.
 
 This function performs the following setup:
+
 - Initializes a logger.
 - Sets up the database connection using the provided `db_config` or environment variables.
 - Creates `JobDBHandler`, `WorkerDBHandler` instances for database interactions.
@@ -124,6 +123,7 @@ def start(self) -> None
 ```
 
 Upon calling `start`:
+
 - It performs a basic check to ensure internal listeners are initialized.
 - Database listeners are created to listen to job events (inserts, updates, deletes) via PostgreSQL NOTIFY/LISTEN.
 - It starts a poller to periodically poll the database for new jobs to process.
@@ -142,7 +142,50 @@ The `stop` method gracefully shuts down the Queuer instance, releasing resources
 def stop(self) -> None
 ```
 
-The `stop` method cancels all jobs, closes database listeners, and cleans up resources.
+The `stop` method cancels all jobs, closes database listeners, and cleans up resources. **Note:** This method can only be used to stop the current worker instance that the code is running in. To stop other workers, use `stop_worker` or `stop_worker_gracefully`.
+
+---
+
+## stop_worker
+
+The `stop_worker` method immediately stops a worker by setting its status to `STOPPED`. This will cancel all running jobs on that worker.
+
+```python
+def stop_worker(self, worker_rid: UUID) -> None
+```
+
+- `worker_rid`: The `UUID` identifying the worker to stop.
+
+When a worker is stopped:
+
+- The worker status is immediately set to `STOPPED` in the database
+- The heartbeat ticker detects the `STOPPED` status and calls `stop()` on that worker
+- All running jobs on that worker are cancelled immediately
+- The worker will no longer accept new jobs
+
+This method is useful for immediately shutting down a worker, for example in emergency situations or when you need to take a worker offline quickly.
+
+---
+
+## stop_worker_gracefully
+
+The `stop_worker_gracefully` method gracefully stops a worker by setting its status to `STOPPING`. This allows currently running jobs to complete before the worker shuts down.
+
+```python
+def stop_worker_gracefully(self, worker_rid: UUID) -> None
+```
+
+- `worker_rid`: The `UUID` identifying the worker to stop gracefully.
+
+When a worker is stopped gracefully:
+
+- The worker status is set to `STOPPING` in the database
+- The heartbeat ticker detects the `STOPPING` status and sets `max_concurrency` to `0`
+- Currently running jobs are allowed to complete normally
+- No new jobs will be accepted by this worker
+- Once all running jobs have finished, the worker status is automatically set to `STOPPED` and the worker shuts down
+
+This method is ideal for maintenance scenarios where you want to ensure all in-progress work completes before shutting down the worker.
 
 ---
 
@@ -169,8 +212,8 @@ The `add_job` method adds a new job to the queue for execution. Jobs are units o
 
 ```python
 def add_job(
-    self, 
-    task: Union[Callable, str], 
+    self,
+    task: Union[Callable, str],
     *parameters: Any,
     **parameters_keyed: Any
 ) -> Job
@@ -279,7 +322,7 @@ class RetryBackoff(str, Enum):
 
 - `RETRY_BACKOFF_NONE`: No backoff. The retry_delay remains constant for all retries.
 - `RETRY_BACKOFF_LINEAR`: The retry delay increases linearly with each attempt (e.g., delay, 2*delay, 3*delay).
-- `RETRY_BACKOFF_EXPONENTIAL`: The retry delay increases exponentially with each attempt (e.g., delay, delay*2, delay*2*2).
+- `RETRY_BACKOFF_EXPONENTIAL`: The retry delay increases exponentially with each attempt (e.g., delay, delay*2, delay*2\*2).
 
 ---
 
