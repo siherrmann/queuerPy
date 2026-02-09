@@ -9,14 +9,14 @@ from typing import Any, List
 
 from .db_job import JobDBHandler
 from .db_worker import WorkerDBHandler
-from ..helper.test_database import DatabaseTestMixin
+from ..helper.test_database import TimescaleTestMixin, PostgresTestMixin
 from ..model.job import Job, JobStatus, new_job
 from ..model.options import Options, Schedule
 from ..model.options_on_error import OnError, RetryBackoff
 from ..model.worker import new_worker
 
 
-class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
+class TestJobDBHandler(TimescaleTestMixin, unittest.TestCase):
     """Test JobDBHandler matching Go's dbJob_test.go exactly."""
 
     @classmethod
@@ -33,7 +33,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # NewJobDBHandler
     def test_new_job_db_handler_valid_call(self):
         """Test valid call to create new JobDBHandler."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         self.assertIsNotNone(
             job_db_handler, "Expected JobDBHandler to return a non-nil instance"
@@ -55,7 +55,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     def test_new_job_db_handler_invalid_call_with_nil_database(self):
         """Test invalid call with None database."""
         with self.assertRaises(AttributeError) as context:
-            JobDBHandler(None, with_table_drop=True)  # type: ignore
+            JobDBHandler(None, self.db_config)  # type: ignore
         # The error should be about accessing 'instance' attribute on NoneType
         self.assertIn(
             "'NoneType' object has no attribute 'instance'", str(context.exception)
@@ -64,7 +64,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # CheckTableExistance
     def test_check_table_existence(self):
         """Test checking job table existence."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         exists = job_db_handler.check_tables_existence()
         self.assertTrue(exists, "Expected job table to exist")
@@ -72,19 +72,19 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # CreateTable
     def test_create_table(self):
         """Test creating job table."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
         job_db_handler.create_table()
 
     # DropTable
     def test_drop_table(self):
         """Test dropping job table."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
         job_db_handler.drop_tables()
 
     # InsertJob
     def test_insert_job(self):
         """Test inserting a job."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job = new_job("TestTask", None)
 
@@ -107,7 +107,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # InsertJobTx
     def test_insert_job_tx(self):
         """Test inserting a job using transaction."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job = new_job("TestTask", None)
 
@@ -132,7 +132,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # BatchInsertJobs (all 4 sub-tests)
     def test_batch_insert_jobs_successful(self):
         """Test successful batch insert jobs."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job_count = 5
         jobs: List[Job] = []
@@ -144,7 +144,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_batch_insert_jobs_with_error_options(self):
         """Test successful batch insert jobs with error options."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job_count = 5
         jobs: List[Job] = []
@@ -164,7 +164,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_batch_insert_jobs_with_schedule_options(self):
         """Test successful batch insert jobs with schedule options."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job_count = 5
         jobs: List[Job] = []
@@ -184,7 +184,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
 
     def test_batch_insert_jobs_with_parameters(self):
         """Test successful batch insert jobs with parameters."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job_count = 5
         jobs: List[Job] = []
@@ -210,7 +210,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         self.assertIsNotNone(updated_worker, "Expected worker to be updated")
 
         # Now we can proceed with the job insertion and update
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job = new_job("TestTask", None)
         inserted_job = job_db_handler.insert_job(job)
@@ -246,7 +246,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # UpdateJobFinal
     def test_update_job_final(self):
         """Test updating job final."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job = new_job("TestTask", None)
         inserted_job = job_db_handler.insert_job(job)
@@ -271,7 +271,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # TestUpdateStaleJobs
     def test_update_stale_jobs(self):
         """Test updating stale jobs functionality."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         updated_count = job_db_handler.update_stale_jobs()
 
@@ -282,7 +282,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # DeleteJob
     def test_delete_job(self):
         """Test deleting a job from archive."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job = new_job("TestTask", None)
         inserted_job = job_db_handler.insert_job(job)
@@ -303,7 +303,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # SelectJob
     def test_select_job(self):
         """Test selecting a job."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job = new_job("TestTask", None)
         inserted_job = job_db_handler.insert_job(job)
@@ -322,7 +322,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     def test_select_all_jobs(self):
         """Test selecting all jobs."""
         new_job_count = 5
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         for i in range(new_job_count):
             job = new_job(f"TestJob{i}", None)
@@ -346,7 +346,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         """Test selecting jobs by worker RID."""
         # This test requires worker functionality
         worker_db_handler = WorkerDBHandler(self.db, with_table_drop=True)
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         # Create a worker with available tasks
         worker = new_worker("TestWorker", 2)
@@ -388,7 +388,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         new_job_count_search = 5
         new_job_count_other = 3
 
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         # Insert multiple jobs with different names
         for _ in range(new_job_count_search):
@@ -419,7 +419,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # AddRetentionArchive
     def test_add_retention_archive(self):
         """Test adding retention policy for archive cleanup"""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         # Test adding retention policy with 30 days
         retention_days = 30
@@ -429,7 +429,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # RemoveRetentionArchive
     def test_remove_retention_archive(self):
         """Test removing retention policy for archive cleanup"""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         # First add a retention policy
         job_db_handler.add_retention_archive(30)
@@ -441,7 +441,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # SelectJobFromArchive
     def test_select_job_from_archive(self):
         """Test selecting job from archive."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         job = new_job("TestTask", None)
         inserted_job = job_db_handler.insert_job(job)
@@ -471,7 +471,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     # SelectAllJobsFromArchive
     def test_select_all_jobs_from_archive(self):
         """Test selecting all jobs from archive."""
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         new_job_count = 5
         for i in range(new_job_count):
@@ -506,7 +506,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
         new_job_count_search = 5
         new_job_count_other = 3
 
-        job_db_handler = JobDBHandler(self.db, with_table_drop=True)
+        job_db_handler = JobDBHandler(self.db, self.db_config)
 
         # Insert multiple jobs with different names
         for _ in range(new_job_count_search):
@@ -550,7 +550,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     def test_update_job_final_encrypted(self):
         """Test updating job final with encryption"""
         job_db_handler = JobDBHandler(
-            self.db, with_table_drop=True, encryption_key="test-encryption-key"
+            self.db, self.db_config, encryption_key="test-encryption-key"
         )
 
         task_name = "TestTask"
@@ -578,7 +578,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     def test_select_job_encrypted(self):
         """Test selecting job with encryption"""
         job_db_handler = JobDBHandler(
-            self.db, with_table_drop=True, encryption_key="test-encryption-key"
+            self.db, self.db_config, encryption_key="test-encryption-key"
         )
 
         task_name = "TestTask"
@@ -608,7 +608,7 @@ class TestJobDBHandler(DatabaseTestMixin, unittest.TestCase):
     def test_select_all_jobs_encrypted(self):
         """Test selecting all jobs with encryption"""
         job_db_handler = JobDBHandler(
-            self.db, with_table_drop=True, encryption_key="test-encryption-key"
+            self.db, self.db_config, encryption_key="test-encryption-key"
         )
 
         new_job_count = 5

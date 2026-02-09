@@ -11,10 +11,10 @@ from .queuer import new_queuer
 from .model.master import Master, MasterSettings
 from .model.worker import new_worker, WorkerStatus
 from .model.job import new_job, JobStatus
-from .helper.test_database import DatabaseTestMixin
+from .helper.test_database import TimescaleTestMixin
 
 
-class TestMasterTicker(DatabaseTestMixin, unittest.TestCase):
+class TestMasterTicker(TimescaleTestMixin, unittest.TestCase):
     """Test master ticker functionality."""
 
     def test_master_ticker_fails_with_nil_old_master(self):
@@ -36,7 +36,7 @@ class TestMasterTicker(DatabaseTestMixin, unittest.TestCase):
         self.assertIn("old master is None", str(context.exception))
 
 
-class TestCheckStaleWorkers(DatabaseTestMixin, unittest.TestCase):
+class TestCheckStaleWorkers(TimescaleTestMixin, unittest.TestCase):
     """Test stale worker checking functionality."""
 
     def test_check_stale_workers_with_no_workers(self):
@@ -149,7 +149,7 @@ class TestCheckStaleWorkers(DatabaseTestMixin, unittest.TestCase):
             queuer.stop()
 
 
-class TestCheckStaleJobs(DatabaseTestMixin, unittest.TestCase):
+class TestCheckStaleJobs(TimescaleTestMixin, unittest.TestCase):
     """Test stale job checking functionality."""
 
     def test_check_stale_jobs_with_no_jobs(self):

@@ -12,14 +12,14 @@ from uuid import uuid4
 
 from .core.runner import go_func
 from .helper.logging import get_logger
-from .helper.test_database import DatabaseTestMixin
+from .helper.test_database import TimescaleTestMixin
 from .queuer import new_queuer_with_db
 from .model.job import Job
 
 logger = get_logger(__name__)
 
 
-class TestQueuerListener(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerListener(TimescaleTestMixin, unittest.TestCase):
     """Test cases for queuer listener functionality."""
 
     @classmethod

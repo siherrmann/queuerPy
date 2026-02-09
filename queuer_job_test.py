@@ -13,7 +13,7 @@ from .queuer import Queuer, new_queuer_with_db
 from .model.job import Job, JobStatus
 from .model.options import Options
 from .model.options_on_error import OnError, RetryBackoff
-from .helper.test_database import DatabaseTestMixin
+from .helper.test_database import TimescaleTestMixin
 
 
 def task_mock(duration: int, param2: str) -> int:
@@ -63,7 +63,7 @@ class MockFailer:
         return self.count
 
 
-class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerJob(TimescaleTestMixin, unittest.TestCase):
     """Test cases for queuer job functionality with real database integration."""
 
     @classmethod
@@ -451,7 +451,7 @@ class TestQueuerJob(DatabaseTestMixin, unittest.TestCase):
 
 
 # Test cases that require running queuer (integration tests)
-class TestQueuerJobRunning(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerJobRunning(TimescaleTestMixin, unittest.TestCase):
     """Test cases for queuer job functionality with running queuer."""
 
     @classmethod

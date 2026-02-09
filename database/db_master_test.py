@@ -7,12 +7,12 @@ import unittest
 import uuid
 
 from .db_master import MasterDBHandler
-from ..helper.test_database import DatabaseTestMixin
+from ..helper.test_database import TimescaleTestMixin
 from ..model.master import MasterSettings
 from ..model.worker import Worker
 
 
-class TestMasterDBHandler(DatabaseTestMixin, unittest.TestCase):
+class TestMasterDBHandler(TimescaleTestMixin, unittest.TestCase):
     """Test cases for MasterDBHandler. Mirrors Go's dbMaster_test.go."""
 
     @classmethod

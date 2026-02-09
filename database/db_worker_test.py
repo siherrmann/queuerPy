@@ -8,11 +8,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from .db_worker import WorkerDBHandler
-from ..helper.test_database import DatabaseTestMixin
+from ..helper.test_database import TimescaleTestMixin
 from ..model.worker import Worker, WorkerStatus
 
 
-class TestWorkerDBHandler(DatabaseTestMixin, unittest.TestCase):
+class TestWorkerDBHandler(TimescaleTestMixin, unittest.TestCase):
     """Test WorkerDBHandler with real database using testcontainers."""
 
     @classmethod

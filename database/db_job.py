@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 from uuid import UUID
 from psycopg.rows import dict_row
 
-from ..helper.database import Database
+from ..helper.database import Database, DatabaseConfiguration
 from ..helper.error import QueuerError
 from ..helper.sql import SQLLoader, run_ddl
 from ..model.job import Job
@@ -25,7 +25,7 @@ class JobDBHandler:
     def __init__(
         self,
         db_connection: Database,
-        with_table_drop: bool = False,
+        db_config: DatabaseConfiguration,
         encryption_key: str = "",
     ):
         """Initialize job database handler."""
@@ -35,12 +35,13 @@ class JobDBHandler:
             raise ValueError("Database connection is not established")
 
         self.encryption_key: str = encryption_key
+        self.with_timescale: bool = db_config.with_timescale
 
         sql_loader: SQLLoader = SQLLoader()
-        sql_loader.load_notify_sql(self.db.instance, force=with_table_drop)
-        sql_loader.load_job_sql(self.db.instance, force=with_table_drop)
+        sql_loader.load_notify_sql(self.db.instance, force=db_config.with_table_drop)
+        sql_loader.load_job_sql(self.db.instance, force=db_config.with_table_drop)
 
-        if with_table_drop:
+        if db_config.with_table_drop:
             self.drop_tables()
 
         self.create_table()
@@ -72,7 +73,7 @@ class JobDBHandler:
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
 
-        run_ddl(self.db.instance, "SELECT init_job();")
+        run_ddl(self.db.instance, f"SELECT init_job({self.with_timescale});")
 
     def drop_tables(self) -> None:
         """Drop job tables with DDL deadlock protection."""
@@ -379,9 +380,15 @@ class JobDBHandler:
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
 
-        with self.db.instance.cursor() as cur:
-            cur.execute("SELECT add_retention_archive(%s);", (days,))
-        self.db.instance.commit()
+        try:
+            with self.db.instance.cursor() as cur:
+                cur.execute(
+                    "SELECT add_retention_archive(%s, %s);", (days, self.with_timescale)
+                )
+            self.db.instance.commit()
+        except Exception as e:
+            self.db.instance.rollback()
+            raise e
 
     def remove_retention_archive(self) -> None:
         """
@@ -391,9 +398,15 @@ class JobDBHandler:
         if self.db.instance is None:
             raise ValueError("Database connection is not established")
 
-        with self.db.instance.cursor() as cur:
-            cur.execute("SELECT remove_retention_archive();")
-        self.db.instance.commit()
+        try:
+            with self.db.instance.cursor() as cur:
+                cur.execute(
+                    "SELECT remove_retention_archive(%s);", (self.with_timescale,)
+                )
+            self.db.instance.commit()
+        except Exception as e:
+            self.db.instance.rollback()
+            raise e
 
     def select_job_from_archive(self, rid: UUID) -> Optional[Job]:
         """

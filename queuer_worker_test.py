@@ -8,13 +8,13 @@ import unittest
 from datetime import timedelta
 from uuid import uuid4
 
-from .helper.test_database import DatabaseTestMixin
+from .helper.test_database import TimescaleTestMixin
 from .model.worker import Worker, WorkerStatus, new_worker
 from .queuer import new_queuer_with_db
 from .helper.error import QueuerError
 
 
-class TestQueuerWorker(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerWorker(TimescaleTestMixin, unittest.TestCase):
     """Test cases for queuer worker functionality."""
 
     @classmethod

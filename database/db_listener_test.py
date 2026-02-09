@@ -10,11 +10,11 @@ import psycopg
 
 from .db_listener import QueuerListener, new_queuer_db_listener
 from ..helper.database import DatabaseConfiguration
-from ..helper.test_database import DatabaseTestMixin
+from ..helper.test_database import TimescaleTestMixin
 from ..helper.error import QueuerError
 
 
-class TestQueuerListenerWithContainer(DatabaseTestMixin):
+class TestQueuerListenerWithContainer(TimescaleTestMixin):
     """Test class for async QueuerListener functionality using real PostgreSQL containers."""
 
     def setup_method(self, method: Any = None):

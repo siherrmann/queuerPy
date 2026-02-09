@@ -15,6 +15,19 @@ from .queuer_global import QueuerGlobalMixin
 logger = logging.getLogger(__name__)
 
 
+def get_current_worker_rid(self) -> Optional[UUID]:
+    """
+    Get the current worker's RID safely with mutex locking.
+    Mirrors Go's GetCurrentWorkerRID method.
+
+    :return: Worker RID or None if no worker
+    """
+    with self.worker_mutex:
+        if self.worker is not None:
+            return self.worker.rid
+        return None
+
+
 class QueuerWorkerMixin(QueuerGlobalMixin):
     """
     Mixin class containing worker-related methods for the Queuer.

@@ -8,7 +8,7 @@ import pytest
 
 from .model.task import Task
 from .queuer import new_queuer_with_db
-from .helper.test_database import DatabaseTestMixin
+from .helper.test_database import TimescaleTestMixin
 
 
 def task_1_test(data: str) -> str:
@@ -21,7 +21,7 @@ def task_2_test(data: str) -> str:
     return f"Custom: {data}"
 
 
-class TestQueuerTask(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerTask(TimescaleTestMixin, unittest.TestCase):
     """Test cases for queuer task functionality."""
 
     @classmethod

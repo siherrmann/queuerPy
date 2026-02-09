@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from .model.worker import Worker
 from .queuer import new_queuer_with_db
-from .helper.test_database import DatabaseTestMixin
+from .helper.test_database import TimescaleTestMixin
 
 
 def nifunc_1_test(start: datetime, current_count: int) -> datetime:
@@ -22,7 +22,7 @@ def nifunc_2_test(start: datetime, current_count: int) -> datetime:
     return start + timedelta(hours=current_count * 2)
 
 
-class TestQueuerNextInterval(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerNextInterval(TimescaleTestMixin, unittest.TestCase):
     """Test cases for queuer next interval functionality."""
 
     @classmethod

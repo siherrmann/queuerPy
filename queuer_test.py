@@ -5,17 +5,21 @@ Based on the Go queuerTest.go implementation.
 
 import threading
 import time
+from datetime import timedelta
 from typing import List
 import unittest
+from uuid import uuid4
 
 from .core.runner import SmallRunner, go_func
+from .database.db_job import JobDBHandler
 from .helper.logging import get_logger
 from .model.batch_job import BatchJob
-from .model.job import Job
+from .model.job import Job, JobStatus, new_job
+from .model.master import MasterSettings
 from .queuer import new_queuer_with_db
 from .helper.database import DatabaseConfiguration
 from .helper.error import QueuerError
-from .helper.test_database import DatabaseTestMixin
+from .helper.test_database import TimescaleTestMixin, PostgresTestMixin
 from .model.options_on_error import OnError, RetryBackoff
 from .model.worker import WorkerStatus
 
@@ -32,7 +36,7 @@ def global_test_task(message: str) -> str:
     return f"Processed: {message}"
 
 
-class TestNewQueuer(DatabaseTestMixin, unittest.TestCase):
+class TestNewQueuer(TimescaleTestMixin, unittest.TestCase):
     """Test new_queuer factory function with various configurations."""
 
     @classmethod
@@ -139,7 +143,7 @@ class TestNewQueuer(DatabaseTestMixin, unittest.TestCase):
             new_queuer_with_db("test_invalid_db", 100, "", invalid_config)
 
 
-class TestQueuerStart(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerStart(TimescaleTestMixin, unittest.TestCase):
     """Test queuer start functionality."""
 
     @classmethod
@@ -189,7 +193,7 @@ class TestQueuerStart(DatabaseTestMixin, unittest.TestCase):
                 queuer.stop()
 
 
-class TestQueuerStop(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerStop(TimescaleTestMixin, unittest.TestCase):
     """Test queuer stop functionality."""
 
     @classmethod
@@ -229,7 +233,7 @@ class TestQueuerStop(DatabaseTestMixin, unittest.TestCase):
         self.assertFalse(queuer.running)
 
 
-class TestQueuerHeartbeat(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerHeartbeat(TimescaleTestMixin, unittest.TestCase):
     """Test queuer heartbeat functionality."""
 
     @classmethod
@@ -283,7 +287,7 @@ class TestQueuerHeartbeat(DatabaseTestMixin, unittest.TestCase):
             )
 
 
-class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerTasks(TimescaleTestMixin, unittest.TestCase):
     """Test queuer task management functionality."""
 
     @classmethod
@@ -384,7 +388,7 @@ class TestQueuerTasks(DatabaseTestMixin, unittest.TestCase):
             queuer.stop()
 
 
-class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
+class TestQueuerNotifications(TimescaleTestMixin, unittest.TestCase):
     """Test queuer notification system and rapid job insertion."""
 
     @classmethod
@@ -455,6 +459,146 @@ class TestQueuerNotifications(DatabaseTestMixin, unittest.TestCase):
             )
         finally:
             listener_runner.get_results()
+            queuer.stop()
+
+
+class TestJobArchiveRetention(TimescaleTestMixin, unittest.TestCase):
+    """
+    Test job archive retention policies with TimescaleDB.
+    Mirrors Go's TestJobArchiveRetention with TimescaleDB retention policy.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setup_class()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().teardown_class()
+
+    def setUp(self):
+        super().setup_method()
+
+    def test_timescale_retention_policy(self):
+        """Test retention policy with TimescaleDB native retention."""
+        # Verify we're using TimescaleDB
+        self.assertTrue(
+            self.db_config.with_timescale,
+            "Expected with_timescale to be True for TimescaleDB tests",
+        )
+
+        # Create queuer with master settings that include retention
+        queuer = new_queuer_with_db("test-retention", 10, "", self.db_config)
+
+        # Define a simple task that the queuer can execute
+        def test_task() -> str:
+            return "success"
+
+        queuer.add_task(test_task)
+
+        try:
+            # Start queuer with master settings
+            master_settings = MasterSettings(retention_archive=1)  # 1 day
+            queuer.start(master_settings)
+
+            # Wait for master to initialize and set up retention
+            time.sleep(6)
+
+            # Verify master was created with correct settings
+            master = queuer.db_master.select_master()
+            self.assertIsNotNone(master, "Expected master to be created")
+            self.assertEqual(
+                1,
+                master.settings.retention_archive,
+                "Expected master retention_archive to be 1 day",
+            )
+
+        finally:
+            queuer.stop()
+
+
+class TestJobArchiveRetentionPostgres(PostgresTestMixin, unittest.TestCase):
+    """
+    Test job archive retention policies with vanilla PostgreSQL.
+    Mirrors Go's TestJobArchiveRetention with PostgreSQL trigger-based retention.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setup_class()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().teardown_class()
+
+    def setUp(self):
+        super().setup_method()
+
+    def test_postgres_trigger_retention(self):
+        """Test retention policy with PostgreSQL trigger-based cleanup."""
+        # Verify we're NOT using TimescaleDB
+        self.assertFalse(
+            self.db_config.with_timescale,
+            "Expected with_timescale to be False for vanilla PostgreSQL tests",
+        )
+
+        # Define a simple task that the queuer can execute
+        def test_task() -> str:
+            return "success"
+
+        # Create queuer with master settings that include retention
+        queuer = new_queuer_with_db("test-retention", 10, "", self.db_config)
+        queuer.add_task(test_task)
+
+        try:
+            # Start queuer with master settings
+            master_settings = MasterSettings(retention_archive=1)  # 1 day
+            queuer.start(master_settings)
+
+            # Wait for master to initialize and set up retention
+            time.sleep(6)
+
+            # Insert old job directly into archive
+            old_job_rid = uuid4()
+            # Get worker RID from the queuer's worker
+            worker_rid = queuer.worker.rid if queuer.worker else None
+            self.assertIsNotNone(worker_rid, "Expected worker to have RID")
+
+            # Get database instance for type narrowing
+            db_instance = queuer.database.instance
+            if db_instance is None:
+                self.fail(
+                    "Expected database instance to be available for inserting old job"
+                )
+
+            with db_instance.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO job_archive (id, rid, worker_id, worker_rid, task_name, status, updated_at, created_at)
+                    VALUES (1, %s, 1, %s, 'test_task', 'SUCCEEDED', 
+                            CURRENT_TIMESTAMP - INTERVAL '2 days', 
+                            CURRENT_TIMESTAMP - INTERVAL '2 days')
+                """,
+                    (old_job_rid, worker_rid),
+                )
+            db_instance.commit()
+
+            # Add 15 jobs to trigger cleanup (trigger runs every 10th insert)
+            for i in range(15):
+                job = queuer.add_job(test_task, None)
+                self.assertIsNotNone(job, f"Expected job {i} to be created")
+
+            # Wait for jobs to complete and trigger to execute
+            time.sleep(5)
+
+            # Verify old job was deleted
+            deleted_job = queuer.db_job.select_job_from_archive(old_job_rid)
+            self.assertIsNone(
+                deleted_job,
+                "Expected old job to be deleted by trigger-based retention",
+            )
+
+        finally:
             queuer.stop()
 
 

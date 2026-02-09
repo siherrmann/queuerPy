@@ -30,6 +30,7 @@ class DatabaseConfiguration:
     schema: str = "public"
     sslmode: str = "require"
     with_table_drop: bool = False
+    with_timescale: bool = True
 
     @classmethod
     def from_env(cls) -> "DatabaseConfiguration":
@@ -44,6 +45,9 @@ class DatabaseConfiguration:
         sslmode = os.getenv("QUEUER_DB_SSLMODE", "require")
         with_table_drop = (
             os.getenv("QUEUER_DB_WITH_TABLE_DROP", "false").lower() == "true"
+        )
+        with_timescale = (
+            os.getenv("QUEUER_DB_WITH_TIMESCALE", "true").lower() != "false"
         )
 
         # Validate required fields
@@ -72,6 +76,7 @@ class DatabaseConfiguration:
             schema=schema,
             sslmode=sslmode,
             with_table_drop=with_table_drop,
+            with_timescale=with_timescale,
         )
 
     def connection_string(self) -> str:

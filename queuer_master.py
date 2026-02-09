@@ -38,14 +38,27 @@ class QueuerMasterMixin(QueuerGlobalMixin):
 
         # Handle retention archive configuration
         try:
-            if old_master.settings.retention_archive == 0:
-                self.db_job.add_retention_archive(master_settings.retention_archive)
-            elif (
-                old_master.settings.retention_archive
-                != master_settings.retention_archive
-            ):
-                self.db_job.remove_retention_archive()
-                self.db_job.add_retention_archive(master_settings.retention_archive)
+            if master_settings.retention_archive > 0:
+                if old_master.settings.retention_archive == 0:
+                    self.db_job.add_retention_archive(master_settings.retention_archive)
+                elif (
+                    old_master.settings.retention_archive
+                    != master_settings.retention_archive
+                ):
+                    try:
+                        self.db_job.remove_retention_archive()
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not remove old retention policy (may not exist): {e}"
+                        )
+                    self.db_job.add_retention_archive(master_settings.retention_archive)
+            elif old_master.settings.retention_archive > 0:
+                try:
+                    self.db_job.remove_retention_archive()
+                except Exception as e:
+                    logger.warning(
+                        f"Could not remove retention policy (may not exist): {e}"
+                    )
         except Exception as e:
             raise QueuerError("managing retention archive", e)
 
@@ -83,10 +96,9 @@ class QueuerMasterMixin(QueuerGlobalMixin):
                     logger.error(f"Error in master ticker task: {e}")
 
             ticker = Ticker(
-                task=ticker_task,
-                name="_master_ticker",
                 interval=timedelta(seconds=master_settings.master_poll_interval),
-                func=ticker_task,
+                task=ticker_task,
+                use_mp=False,  # Use threading instead of multiprocessing to avoid pickling issues
             )
             logger.info("Starting master ticker...")
             ticker.go()
@@ -150,10 +162,9 @@ class QueuerMasterMixin(QueuerGlobalMixin):
 
             # Create and start the polling ticker
             ticker = Ticker(
-                task=ticker_task,
-                name="_poll_master_ticker",
                 interval=timedelta(seconds=master_settings.master_poll_interval),
-                func=ticker_task,
+                task=ticker_task,
+                use_mp=False,  # Use threading instead of multiprocessing to avoid pickling issues
             )
 
             logger.info("Starting master poll ticker...")

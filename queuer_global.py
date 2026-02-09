@@ -56,7 +56,7 @@ class QueuerGlobalMixin:
 
         # Database handlers
         self.db_job: JobDBHandler = JobDBHandler(
-            self.database, db_config.with_table_drop, encryption_key
+            self.database, db_config, encryption_key
         )
         self.db_worker: WorkerDBHandler = WorkerDBHandler(
             self.database, db_config.with_table_drop
