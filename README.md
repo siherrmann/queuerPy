@@ -411,6 +411,7 @@ worker_jobs = queuer.get_jobs_by_worker_rid(worker.rid)
 
 - **Keyword Arguments Support**: Python functions can use both positional arguments (`*args`) and keyword arguments (`**kwargs`), while maintaining compatibility with Go jobs that use only positional parameters.
 - **Async/Await Support**: Full asyncio integration with threading fallbacks.
+- **Multiprocessing pool**: Usage of a multiprocessing pool to reuse memory so global variables can be reused after first load.
 - **PostgreSQL NOTIFY/LISTEN**: Real-time job notifications without polling overhead.
 - **Batch Job Processing**: Insert job batches efficiently using PostgreSQL's `COPY FROM` feature.
 - **Panic Recovery**: Automatic recovery for all running jobs in case of unexpected failures.

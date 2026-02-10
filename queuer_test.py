@@ -25,6 +25,9 @@ from .model.worker import WorkerStatus
 
 logger = get_logger(__name__)
 
+# Global variable for testing process reuse
+_process_memory_state = None
+
 
 def global_simple_task(x: int) -> int:
     """Global simple task function for testing."""
@@ -34,6 +37,27 @@ def global_simple_task(x: int) -> int:
 def global_test_task(message: str) -> str:
     """Global test task function for testing."""
     return f"Processed: {message}"
+
+
+def global_process_reuse_task() -> str:
+    """
+    Task function that tests process reuse by checking/setting a global variable.
+    First execution should load (set global to 1), subsequent executions in the
+    same process should detect the already-loaded state.
+    """
+    global _process_memory_state
+
+    if _process_memory_state is None:
+        # Simulate loading/initialization
+        logger.info("Loading process state (first execution in this process)")
+        _process_memory_state = 1
+        return "loaded"
+    else:
+        # Process memory was reused
+        logger.info(
+            f"Process state already loaded: {_process_memory_state} (process reused)"
+        )
+        return "reused"
 
 
 class TestNewQueuer(TimescaleTestMixin, unittest.TestCase):
@@ -459,6 +483,56 @@ class TestQueuerNotifications(TimescaleTestMixin, unittest.TestCase):
             )
         finally:
             listener_runner.get_results()
+            queuer.stop()
+
+    def test_process_reuse_with_pool(self):
+        """Test that multiprocessing pool reuses processes and maintains state."""
+        # Use max_concurrency=1 to ensure both jobs run on the same worker process
+        queuer = new_queuer_with_db("test_process_reuse", 1, "", self.db_config)
+
+        try:
+            queuer.add_task(global_process_reuse_task)
+            queuer.start()
+
+            # Add first job - should load the state
+            job1 = queuer.add_job(global_process_reuse_task)
+            self.assertIsNotNone(job1, "First job should be created")
+
+            # Wait for first job to complete
+            time.sleep(2.0)
+
+            # Check first job result (completed jobs are in archive)
+            job1_result = queuer.db_job.select_job_from_archive(job1.rid)
+            self.assertIsNotNone(job1_result, "First job should exist in archive")
+            if job1_result:
+                self.assertEqual(
+                    JobStatus.SUCCEEDED, job1_result.status, "First job should succeed"
+                )
+                self.assertEqual(
+                    "loaded", job1_result.results[0], "First job should load the state"
+                )
+
+            # Add second job - should reuse the process and find state already loaded
+            job2 = queuer.add_job(global_process_reuse_task)
+            self.assertIsNotNone(job2, "Second job should be created")
+
+            # Wait for second job to complete
+            time.sleep(2.0)
+
+            # Check second job result (completed jobs are in archive)
+            job2_result = queuer.db_job.select_job_from_archive(job2.rid)
+            self.assertIsNotNone(job2_result, "Second job should exist in archive")
+            if job2_result:
+                self.assertEqual(
+                    JobStatus.SUCCEEDED, job2_result.status, "Second job should succeed"
+                )
+                self.assertEqual(
+                    "reused",
+                    job2_result.results[0],
+                    "Second job should detect reused process with pre-loaded state",
+                )
+
+        finally:
             queuer.stop()
 
 

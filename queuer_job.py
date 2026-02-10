@@ -110,6 +110,7 @@ class QueuerJobMixin(QueuerGlobalMixin):
         runner = Runner(
             task=self._wait_for_job_added_inner,
             args=(timeout_seconds,),
+            pool=self._process_pool,
             kwargs={},
         )
         runner.go()
@@ -421,7 +422,9 @@ class QueuerJobMixin(QueuerGlobalMixin):
         try:
             parameters = getattr(job, "parameters", [])
             parameters_keyed = getattr(job, "parameters_keyed", {})
-            runner = Runner(task, *parameters, **parameters_keyed)
+            runner = Runner(
+                task, *parameters, pool=self._process_pool, **parameters_keyed
+            )
 
             logger.info(f"Created runner for job {job.rid}")
 
@@ -507,9 +510,9 @@ class QueuerJobMixin(QueuerGlobalMixin):
         """
         try:
             # Create a Runner process for the async job
-            runner = Runner(self._run_job, job)
+            runner = Runner(self._run_job, job, pool=self._process_pool)
             runner.go()
-            logger.info(f"Scheduled job {job.rid} started in process {runner.pid}")
+            logger.info(f"Scheduled job {job.rid} started")
 
         except Exception as e:
             logger.error(f"Error executing scheduled job {job.rid}: {e}")

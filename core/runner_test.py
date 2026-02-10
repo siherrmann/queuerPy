@@ -3,6 +3,7 @@
 import unittest
 import time
 import asyncio
+import multiprocessing
 
 from .runner import Runner, SmallRunner, go_func
 
@@ -42,26 +43,36 @@ def simple_task():
 class TestRunner(unittest.TestCase):
     """Test the singleton Runner implementation."""
 
+    def setUp(self):
+        """Set up test fixtures - create a pool for testing."""
+        self.pool = multiprocessing.Pool(processes=2)
+
+    def tearDown(self):
+        """Tear down test fixtures - clean up the pool."""
+        self.pool.close()
+        self.pool.join()
+
     def test_successful_task(self):
         """Test running a successful task."""
         # Test async task
-        runner = Runner(task_async, 0.1, 3)
+        runner = Runner(task_async, 0.1, 3, pool=self.pool)
         runner.go()
         result = runner.get_results(timeout=2.0)
         self.assertEqual(result, 3.1, "Expected 0.1 + 3 = 3.1")
-        self.assertEqual(runner.exitcode, 0)
+        # In pool mode, exitcode is not available (returns None)
+        self.assertIsNone(runner.exitcode, "exitcode should be None in pool mode")
 
         # Test sync task
-        runner2 = Runner(task_sync, 0.1, 2)
+        runner2 = Runner(task_sync, 0.1, 2, pool=self.pool)
         runner2.go()
         result2 = runner2.get_results(timeout=2.0)
         self.assertEqual(result2, 2.1, "Expected 0.1 + 2 = 2.1")
-        self.assertEqual(runner2.exitcode, 0)
+        self.assertIsNone(runner2.exitcode, "exitcode should be None in pool mode")
 
     def test_failed_task(self):
         """Test running a task that fails."""
         # Test async failing task
-        runner = Runner(failing_task_async)
+        runner = Runner(failing_task_async, pool=self.pool)
         runner.go()
 
         # Test that Runner properly handles exceptions
@@ -74,7 +85,7 @@ class TestRunner(unittest.TestCase):
 
     def test_runner_initialization(self):
         """Test Runner initialization and properties."""
-        runner = Runner(task_sync, 1, 2, extra="value")
+        runner = Runner(task_sync, 1, 2, pool=self.pool, extra="value")
 
         self.assertEqual(runner.task, task_sync)
         self.assertEqual(runner.args, (1, 2))
@@ -85,7 +96,7 @@ class TestRunner(unittest.TestCase):
 
     def test_async_runner_initialization(self):
         """Test async Runner initialization."""
-        runner = Runner(task_async, 1, 2)
+        runner = Runner(task_async, 1, 2, pool=self.pool)
 
         self.assertEqual(runner.task, task_async)
         self.assertTrue(runner.is_async)
@@ -93,7 +104,7 @@ class TestRunner(unittest.TestCase):
 
     def test_runner_with_kwargs(self):
         """Test runner with keyword arguments."""
-        runner = Runner(task_with_kwargs, 2, 3, multiplier=5)
+        runner = Runner(task_with_kwargs, 2, 3, pool=self.pool, multiplier=5)
         runner.go()
         result = runner.get_results(timeout=1.0)
         self.assertEqual(result, 25)  # (2 + 3) * 5
@@ -104,8 +115,8 @@ class TestRunner(unittest.TestCase):
         def test_function():
             pass
 
-        runner1 = Runner(test_function)
-        runner2 = Runner(test_function)
+        runner1 = Runner(test_function, pool=self.pool)
+        runner2 = Runner(test_function, pool=self.pool)
 
         self.assertEqual(runner1.name, "test_function")
         self.assertEqual(runner2.name, "test_function")
@@ -113,13 +124,13 @@ class TestRunner(unittest.TestCase):
     def test_parameter_validation(self):
         """Test parameter validation."""
         # Should work with correct parameters
-        runner = Runner(task_async, 0.1, 5)
+        runner = Runner(task_async, 0.1, 5, pool=self.pool)
         runner.go()
         result = runner.get_results(timeout=2.0)
         self.assertEqual(result, 5.1, "Expected 0.1 + 5 = 5.1")
 
         # Should fail with wrong number of parameters
-        runner2 = Runner(task_async, 1)  # Missing one parameter
+        runner2 = Runner(task_async, 1, pool=self.pool)  # Missing one parameter
         runner2.go()
         with self.assertRaises(TypeError):
             runner2.get_results(timeout=2.0)
@@ -128,9 +139,9 @@ class TestRunner(unittest.TestCase):
         """Test running multiple tasks concurrently."""
         # Start multiple runners concurrently
         start_time = time.time()
-        runner1 = Runner(task_async, 0.1, 10)
-        runner2 = Runner(task_async, 0.1, 20)
-        runner3 = Runner(task_async, 0.1, 30)
+        runner1 = Runner(task_async, 0.1, 10, pool=self.pool)
+        runner2 = Runner(task_async, 0.1, 20, pool=self.pool)
+        runner3 = Runner(task_async, 0.1, 30, pool=self.pool)
 
         # Start all runners
         runner1.go()
@@ -156,16 +167,12 @@ class TestRunner(unittest.TestCase):
             f"Concurrent execution took {total_time}s, should be < 1.0s (sequential would be ~0.3s)",
         )
 
-        # Runners should be processes, not threads (have pid attribute)
+        # Pool-based runners use worker processes, pid not directly available
         self.assertTrue(
-            hasattr(runner1, "pid"), "Runner should have pid (it's a process)"
+            hasattr(runner1, "pid"), "Runner should have pid property"
         )
-        self.assertIsNotNone(runner1.pid, "Runner should have a process ID")
-
-        # Threads should be finished
-        self.assertFalse(runner1.is_alive(), "Runner 1 should have finished")
-        self.assertFalse(runner2.is_alive(), "Runner 2 should have finished")
-        self.assertFalse(runner3.is_alive(), "Runner 3 should have finished")
+        # In pool mode, pid returns None (worker process not directly accessible)
+        self.assertIsNone(runner1.pid, "Runner.pid should be None in pool mode")
 
 
 class TestSmallRunner(unittest.TestCase):
@@ -262,6 +269,15 @@ class TestSmallRunner(unittest.TestCase):
 class TestGoFunc(unittest.TestCase):
     """Test the go_func convenience function."""
 
+    def setUp(self):
+        """Create a pool for testing."""
+        self.pool = multiprocessing.Pool(processes=2)
+
+    def tearDown(self):
+        """Clean up the pool after tests."""
+        self.pool.close()
+        self.pool.join()
+
     def test_go_func_threading(self):
         """Test the go_func function with threading mode."""
         runner1 = go_func(task_sync, False, 0.2, 1)
@@ -278,9 +294,9 @@ class TestGoFunc(unittest.TestCase):
 
     def test_go_func_multiprocessing(self):
         """Test the go_func function with multiprocessing mode."""
-        runner1 = go_func(task_sync, True, 0.2, 1)
-        runner2 = go_func(task_sync, True, 0.2, 2)
-        runner3 = go_func(task_sync, True, 0.2, 3)
+        runner1 = go_func(task_sync, True, 0.2, 1, pool=self.pool)
+        runner2 = go_func(task_sync, True, 0.2, 2, pool=self.pool)
+        runner3 = go_func(task_sync, True, 0.2, 3, pool=self.pool)
 
         result1 = runner1.get_results(timeout=2.0)
         result2 = runner2.get_results(timeout=2.0)

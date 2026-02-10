@@ -1,3 +1,4 @@
+import multiprocessing
 import threading
 from typing import Any, Callable, Dict, Optional
 
@@ -44,6 +45,10 @@ class QueuerGlobalMixin:
         self.worker: Worker
         self.tasks: Dict[str, Task] = {}
         self.next_interval_funcs: Dict[str, Callable[..., Any]] = {}
+
+        # Process pool for runner reuse (initialized in start())
+        self._process_pool: Optional[Any] = None
+        self._pool_size: int = 4  # Default, will be set based on max_concurrency
 
     def initialise(
         self,

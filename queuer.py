@@ -6,6 +6,7 @@ Mirrors the Go Queuer struct with Python async patterns.
 # Standard library imports
 import asyncio
 import json
+import multiprocessing
 import os
 import threading
 import time
@@ -121,6 +122,9 @@ class Queuer(
         # Active runners (jobs currently executing)
         self.active_runners: Dict[UUID, Runner] = {}
 
+        # Set pool size based on max_concurrency
+        self._pool_size = max_concurrency if max_concurrency > 0 else 4
+
         # Database listeners (will be initialized in start())
         self.job_db_listener: Optional[QueuerListener] = None
         self.job_archive_db_listener: Optional[QueuerListener] = None
@@ -169,6 +173,17 @@ class Queuer(
         self.running = True
         self._stopped.clear()
         self._cancel_event = asyncio.Event()
+
+        # Create process pool for job execution
+        try:
+            self._process_pool = multiprocessing.Pool(
+                processes=self._pool_size,
+                maxtasksperchild=100,
+            )
+            logger.info(f"Created process pool with {self._pool_size} workers")
+        except Exception as e:
+            logger.error(f"Failed to create process pool: {e}")
+            raise
 
         # Set up database listeners
         try:
@@ -293,8 +308,24 @@ class Queuer(
 
         # Cancel all active runners
         for runner_id, runner in list(self.active_runners.items()):
-            runner.cancel()
+            cancelled = runner.cancel()
+            if not cancelled:
+                # Pool-based runner, need to restart pool
+                logger.warning("Pool-based runner cannot be individually cancelled")
             del self.active_runners[runner_id]
+
+        # Clean up process pool
+        if self._process_pool:
+            logger.info("Closing process pool")
+            try:
+                self._process_pool.close()
+                self._process_pool.join(timeout=5.0)
+                # Force terminate if workers didn't finish gracefully
+                self._process_pool.terminate()
+                self._process_pool.join()
+                self._process_pool = None
+            except Exception as e:
+                logger.warning(f"Error closing process pool: {e}")
 
         # Cancel the context to stop the queuer
         if self._cancel_event:

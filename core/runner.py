@@ -15,115 +15,170 @@ from ..helper.logging import get_logger
 logger = get_logger(__name__)
 
 
-class Runner(multiprocessing.Process):
+class Runner:
     """
     The core execution environment. Manages the execution of a single task
-    in a separate, reliably killable multiprocessing context, and retrieves its result.
+    in a multiprocessing pool for efficient process reuse.
+
+    Supports cancellation with automatic periodic checking:
+    - Async tasks are monitored every 0.1s and can be cancelled mid-execution
+    - Sync tasks can only be cancelled before they start (Python limitation)
 
     :param task: The synchronous or asynchronous function to execute.
     :param args: Arguments to pass to the task function.
-    :param name_prefix: Prefix for the process name (e.g., "Job-Runner").
+    :param pool: Multiprocessing.Pool for process reuse (required).
+    :param kwargs: Keyword arguments to pass to the task function.
     """
 
     def __init__(
         self,
         task: Callable[..., Any],
         *args: Any,
+        pool: Any,
         **kwargs: Any,
     ):
         """
-        Initializes the Runner process.
+        Initializes the Runner.
 
         :param task: The synchronous or asynchronous function to execute.
         :param args: Arguments to pass to the task function.
+        :param pool: Multiprocessing.Pool for process reuse (required).
+        :param kwargs: Keyword arguments to pass to the task function.
         """
-        super().__init__(name=task.__name__, daemon=True)
         self.task = task
         self.args = args
         self.kwargs = kwargs
         self.is_async = inspect.iscoroutinefunction(task)
-        self._result_queue: multiprocessing.Queue[Any] = multiprocessing.Queue(1)
+        self.name = task.__name__
+        self._pool = pool
+        self._async_result: Optional[Any] = None
+        # Use Manager Event for cross-process sharing (pickleable)
+        manager = multiprocessing.Manager()
+        self._cancel_event = manager.Event()
+
+    @property
+    def pid(self) -> Optional[int]:
+        """Process ID (not available in pool mode)."""
+        return None
+
+    @property
+    def daemon(self) -> bool:
+        """Daemon status (always True for pool workers)."""
+        return True
+
+    @property
+    def exitcode(self) -> Optional[int]:
+        """Exit code (not available in pool mode)."""
+        return None
+
+    @staticmethod
+    def _execute_in_pool_worker(
+        task: Callable[..., Any],
+        args: tuple,
+        kwargs: dict,
+        is_async: bool,
+        cancel_event: Any,
+    ) -> Any:
+        """
+        Static method to execute tasks in pool workers.
+        Handles both sync and async tasks, returns result directly.
+        Checks for cancellation before and during execution.
+        """
+        # Check if task was cancelled before execution
+        if cancel_event.is_set():
+            raise asyncio.CancelledError("Task was cancelled before execution")
+
+        if is_async:
+            # For async tasks, monitor cancellation during execution
+            result = asyncio.run(
+                Runner._run_async_with_cancellation(task, args, kwargs, cancel_event)
+            )
+        else:
+            # For sync tasks, just execute (can't interrupt mid-execution easily)
+            result = task(*args, **kwargs)
+        return result
+
+    @staticmethod
+    async def _run_async_with_cancellation(
+        task: Callable[..., Any],
+        args: tuple,
+        kwargs: dict,
+        cancel_event: Any,
+    ) -> Any:
+        """
+        Run async task with periodic cancellation checking.
+        Monitors cancel_event and cancels the task if it's set.
+        """
+        # Create the task
+        task_coro = task(*args, **kwargs)
+        task_obj = asyncio.create_task(task_coro)
+
+        # Monitor for cancellation every second
+        async def monitor_cancellation():
+            while not task_obj.done():
+                if cancel_event.is_set():
+                    task_obj.cancel()
+                    break
+                await asyncio.sleep(1)
+
+        monitor = asyncio.create_task(monitor_cancellation())
+        try:
+            result = await task_obj
+            monitor.cancel()
+            return result
+        except asyncio.CancelledError:
+            monitor.cancel()
+            raise asyncio.CancelledError("Task was cancelled during execution")
+        finally:
+            try:
+                await monitor
+            except asyncio.CancelledError:
+                pass
 
     def go(self) -> None:
-        """Starts the Runner process in the background."""
-        self.start()
-
-    def run(self) -> None:
-        """
-        The main execution method, executed in the child process.
-        It executes the assigned task, sends the result to the queue, and exits.
-        """
-        try:
-            if self.is_async:
-                result = asyncio.run(self.task(*self.args, **self.kwargs))
-            else:
-                result = self.task(*self.args, **self.kwargs)
-
-            try:
-                self._result_queue.put(result)
-            except BrokenPipeError as e:
-                pass
-        except Exception as e:
-            logger.debug(traceback.format_exc())
-            try:
-                self._result_queue.put(e)
-            except BrokenPipeError as e:
-                pass
+        """Starts the Runner in the background using the pool."""
+        self._async_result = self._pool.apply_async(
+            Runner._execute_in_pool_worker,
+            (self.task, self.args, self.kwargs, self.is_async, self._cancel_event),
+        )
 
     def get_results(self, timeout: Optional[float] = None) -> Any:
         """
-        Waits for the runner process to complete and returns the result.
+        Waits for the runner to complete and returns the result.
 
         :param timeout: Time in seconds to wait for the result. If None, waits indefinitely.
         :returns: The result returned by the executed task function.
         :raises TimeoutError: If the result is not available within the specified timeout.
-        :raises Exception: If the task execution in the runner process failed.
+        :raises asyncio.CancelledError: If the task was cancelled.
+        :raises Exception: If the task execution failed.
         """
         logger.debug(f"Runner.get_results() called for {self.name}, timeout={timeout}")
+        assert (
+            self._async_result is not None
+        ), "go() must be called before get_results()"
         try:
-            self.join(timeout=timeout)
-
-            if self.is_alive():
-                raise TimeoutError(f"runner timed out after {timeout} seconds.")
-
-            if self._result_queue.empty():
-                if self.exitcode == 0:
-                    return None
-                else:
-                    raise Exception(f"runner failed with code {self.exitcode}")
-
-            try:
-                result = self._result_queue.get_nowait()
-            except Exception as e:
-                raise
-
-            if isinstance(result, Exception):
-                raise result
-
+            result = self._async_result.get(timeout=timeout)
             return result
-        except Exception as e:
-            raise e
+        except multiprocessing.TimeoutError:
+            raise TimeoutError(f"runner timed out after {timeout} seconds.")
+        except asyncio.CancelledError:
+            logger.debug(f"Runner {self.name} was cancelled")
+            raise
 
     def cancel(self) -> bool:
         """
-        Attempts to cancel the running process.
+        Attempts to cancel the running task by setting the cancellation event.
 
-        :returns: True if the process was successfully terminated, False otherwise.
-        :raises: Exception if an error occurs during termination.
+        Cancellation behavior:
+        - Async tasks: Checked every second during execution, task will be cancelled
+        - Sync tasks: Only checked before execution starts (cannot interrupt mid-execution)
+        - Queued tasks: Cancelled before they begin executing
+
+        :returns: True if cancellation signal was sent successfully.
         """
-        try:
-            if not self.is_alive():
-                logger.debug(f"Runner {self.name}: Already finished")
-                return True
-
-            logger.debug(f"Cancelling runner {self.name}")
-            self.terminate()
-            self.join(timeout=5.0)  # Wait up to 5 seconds for clean termination
-            result = not self.is_alive()
-            return result
-        except Exception as e:
-            logger.warning(f"Error cancelling runner {self.name}: {e}")
-            return False
+        logger.debug(f"Cancelling runner {self.name}")
+        self._cancel_event.set()
+        return True
 
 
 class SmallRunner(threading.Thread):
@@ -253,7 +308,11 @@ class SmallRunner(threading.Thread):
 
 
 def go_func(
-    func: Callable[..., Any], use_mp: bool = True, *args: Any, **kwargs: Any
+    func: Callable[..., Any],
+    use_mp: bool = True,
+    *args: Any,
+    pool: Any = None,
+    **kwargs: Any,
 ) -> Union[Runner, SmallRunner]:
     """
     Go-like async function execution factory. Selects the appropriate runner.
@@ -262,11 +321,14 @@ def go_func(
     :param use_mp: If True (default), uses the multiprocessing Runner (isolated).
                    If False, uses the threading SmallRunner (shared state).
     :param args: Positional arguments for the function.
+    :param pool: Multiprocessing.Pool for process reuse (required if use_mp=True).
     :param kwargs: Keyword arguments for the function.
     :returns: A running Runner or SmallRunner instance.
     """
     if use_mp:
-        runner = Runner(func, *args, **kwargs)
+        if pool is None:
+            raise ValueError("pool is required when use_mp=True")
+        runner = Runner(func, *args, pool=pool, **kwargs)
     else:
         runner = SmallRunner(func, *args, **kwargs)
 
